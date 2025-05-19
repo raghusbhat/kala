@@ -1,0 +1,18 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+You can always search the entire codebase
+1. Always use Tailwindcss and if something is not possible using tailwind use css. example custom scrollbar.
+2. Always use Shadcn components, if not available or working for the scenario, then create custom component.
+3. Create reusable code and modular logics.
+4. Simple code. No complex code.
+5. Always understand the overall context of the project.
+6. Refer docs and web if required. do not hallucinate. Ask questions.
+7. Do not run npm dev. I am running it in seperate windows terminal.
+8. Always write secure code and handle all errors elegantly. 
+9. Use only packages from [package.json](mdc:package.json). if you need additional packages, state why you need it in brief sentence and ask. i will allow if required or appropriate.
+10. Always write secure code.
+
+

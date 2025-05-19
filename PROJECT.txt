@@ -1,0 +1,169 @@
+# Chitrakala AI UI Studio - Project Requirements
+
+## Core Vision
+Figma-like design canvas with integrated AI capabilities for:
+- Natural language to UI component generation
+- Context-aware design modifications
+- Professional-grade export capabilities, including developer-friendly formats.
+
+## Canvas System Requirements
+
+### 1. Vector Editing Foundation
+- **Primitive Shapes**:
+  - Rectangle (with corner radius controls)
+  - Ellipse/Circle
+  - Polygon/Star (configurable sides/points)
+  - Lines (with arrowhead options)
+
+- **Complex Containers**:
+  - **Frames:** Must behave *exactly* like Figma frames. Key requirements include:
+    - Acts as a container for other layers (shapes, groups, other frames, images, text).
+    - Layers placed inside a frame have positions relative to the frame's top-left corner.
+    - Moving, rotating, or scaling the frame transforms all contained layers relative to the frame.
+    - Copying and pasting an element *into* a frame places it relative to the frame's coordinates.
+    - Support for clipping content outside the frame bounds (toggleable: "Clip Content").
+    - Frames themselves can have fills, borders, and effects like other shapes.
+    - Should support future implementation of layout features like Auto Layout (though Auto Layout itself is out of scope for initial phases).
+  - **Groups:** Must behave *exactly* like Figma groups. Key requirements include:
+    - Bundles multiple selected layers together for easier selection and transformation.
+    - Moving, rotating, or scaling the group applies the transformation to all child layers while they maintain their relative positions to each other within the group.
+    - Does *not* inherently clip content.
+    - Child layers within a group maintain their absolute coordinates relative to the canvas (unlike frames).
+
+- **Path Tools**:
+  - Pen tool (creation and editing of bezier curves with anchor points, handles)
+  - Boolean operations (union, subtract, intersect, exclude) on shapes and paths.
+  - Path simplification/optimization algorithms.
+
+- **Styling System**:
+  - Fill options (solid color, linear gradients, radial gradients, angular gradients, diamond gradients, image fills - including tiling, scaling, cropping)
+  - Border (Stroke) controls (stroke width, color, opacity, cap styles (butt, round, square), join styles (miter, round, bevel), dash patterns, stroke alignment (inside, outside, center))
+  - Layer effects (Drop shadows, Inner shadows, Layer blur, Background blur)
+
+### 2. AI Features
+
+#### Component Generation
+- **Text-to-UI** (Triggered via Right Sidebar panel):
+  - Generate complex UI components or layouts from natural language prompts.
+  - Examples: "Design me a login form with social auth buttons below the password field", "Create a dashboard header with search input, avatar, and notifications icon", "Generate a simple landing page layout with a hero section, features grid, and footer".
+  - Should aim to place generated components logically on the canvas or within a selected frame/group.
+
+#### Contextual Editing
+- **In-Canvas Prompting**:
+  - Modify selected elements or groups of elements using natural language.
+  - Examples: Select element → "Change fill to #3498db and add 8px corner radius", Multi-select rectangles → "Distribute horizontal space evenly with 24px gap and align top", Select element → "Convert this rectangle into a card component with a subtle drop shadow and 16px padding inside".
+  - AI should understand context of selected elements (type, position, existing styles).
+
+#### AI Model Requirements
+- Visual understanding of component types, hierarchy, and layout structures.
+- Design system awareness (understanding concepts like spacing, typography scales, color palettes) to generate consistent designs.
+- Precise style modification capabilities ("Make this 10% darker", "Increase stroke weight by 2px").
+
+## Developer Handoff / Code Generation
+
+### 1. Design/Dev Tab Toggle
+- A clear UI mechanism (e.g., tabs, toggle switch) to switch the main view between the visual design canvas and a code editor.
+
+### 2. Integrated Code IDE
+- When in "Dev" mode, the main content area should transform into a functional code editor (like a simplified VS Code view).
+- The IDE should be pre-populated with the code representation of the *currently visible/selected* elements on the canvas.
+- The code should be generated in **React + Tailwind CSS** format.
+- Changes made on the canvas should update the code in the IDE in near real-time (one-way sync: Canvas -> Code). Two-way sync (Code -> Canvas) is out of scope for initial phases.
+- The IDE should support basic code editing features (syntax highlighting, scrolling).
+
+### 3. Code Export
+- Allow exporting the generated React+Tailwind code directly from the Dev tab or via the main export menu.
+
+## Export System Requirements
+
+### 1. Image Exports
+| Format | Requirements |
+|--------|--------------|
+| **PNG** | - Configurable DPI (72-300) <br> - Transparency support <br> - Configurable scales (@1x, @2x, @3x, etc.) |
+| **JPG** | - Quality slider (60-100%) <br> - Background color selection <br> - Configurable scales |
+| **WebP** | - Lossless/lossy toggle <br> - Compression level control <br> - Configurable scales |
+
+### 2. Vector Exports
+| Format | Requirements |
+|--------|--------------|
+| **SVG** | - Preserve layer structure and grouping <br> - Configurable decimal precision <br> - Options for CSS classes vs. inline styles |
+| **PDF** | - Multi-page support (exporting frames as pages) <br> - Print-ready options (bleed margins, crop marks - stretch goal) <br> - CMYK/RGB color space selection |
+
+### 3. Specialized Exports
+- **Figma-compatible SVG** (retain vector editability when imported back into Figma or similar tools)
+- **Lottie JSON** for animated elements (requires dedicated animation features on canvas - stretch goal beyond initial phases)
+- **Icon Sprite Sheets** (SVG symbol system for selected icons/elements)
+- **Design Tokens JSON** (extract styles like colors, typography, spacing from canvas elements)
+
+## Technical Specifications
+
+### Rendering Engine
+- **CanvasKit (Skia Web)** must be the primary rendering engine for the canvas.
+- Implement a WebGL/WebGPU fallback system if CanvasKit cannot be initialized.
+- Utilize offscreen rendering techniques (e.g., OffscreenCanvas) for performance-critical operations like exports.
+
+### Performance Targets
+- Maintain smooth interaction at **60fps** even with **500+ complex elements** on the canvas.
+- Achieve **<1 second export generation** time for standard sizes and formats.
+- GPU-accelerated rendering, effects, and filtering via CanvasKit.
+
+## Quality Assurance
+
+### Visual Fidelity
+- **Pixel-perfect rendering** on canvas and exports at all scales.
+- **<1% color variance** between canvas rendering and exported assets.
+- **Font rendering consistency** across the canvas and different export formats.
+
+### AI Accuracy
+- Target **90%+ component generation success rate** for well-defined prompts.
+- Aim for **<3 modification iterations** on average using contextual editing to achieve the desired result.
+- High context preservation in multi-step prompts for coherent design evolution.
+
+## Example Workflow
+
+1. User is in the "Design" tab.
+2. User prompts via the sidebar: "Create a mobile app tab bar with 5 icons and labels".
+3. AI generates the component within a new Frame on the canvas, correctly spaced and structured.
+4. User selects the frame and uses in-canvas prompting: "Make the active state icon blue and slightly larger".
+5. User switches to the "Dev" tab.
+6. The IDE displays the React code for the tab bar component using Tailwind classes.
+7. User exports the code via the menu.
+8. User returns to the "Design" tab and exports the component as a PNG @2x for visual assets.
+
+## Phase Implementation
+
+Based on complexity and dependency:
+
+### Phase 1: Core Canvas & Basic AI
+- CanvasKit initialization and basic rendering setup.
+- Implementation of basic primitive shapes (Rectangle, Ellipse, Line) with core styling (solid fill, stroke, basic corner radius).
+- Basic selection, movement, scaling, rotation.
+- Initial implementation of **Basic Frames and Groups** (container behavior, moving contents, relative positioning for frames, non-clipping group). *Full Figma fidelity for frames/groups is Phase 2/3*.
+- Basic AI Text-to-UI for simple, single components (e.g., button, input field, simple card).
+- Basic PNG and SVG export (simple shapes, limited styling).
+- Core state management with Zustand.
+- Basic error handling and performance monitoring setup.
+
+### Phase 2: Advanced Canvas, Improved AI, Core Exports
+- Refine and add advanced styling controls (gradients, image fills, full stroke options, basic layer effects like drop shadow).
+- Implement **Full Figma-like Frames and Groups** behavior (clipping, precise relative positioning, grouping behavior).
+- Implement Path Tools (Pen tool, Boolean operations).
+- Enhance AI Text-to-UI for multi-component layouts (e.g., simple forms, headers).
+- Implement AI Contextual Editing for basic style and transform modifications.
+- Implement JPG, WebP, and basic PDF export.
+- Refine PNG/SVG export with more styling support.
+- Continue performance optimization for canvas rendering.
+- Strengthen error handling around canvas operations and AI calls.
+
+### Phase 3: Developer Handoff, Advanced Exports, Optimization
+- Implement the **Design/Dev Tab toggle**.
+- Implement the **Integrated Code IDE** showing **React + Tailwind CSS** code generated from the canvas.
+- Implement Code Export feature.
+- Implement advanced export options (Quality sliders, DPI, Scales for all image formats, SVG precision/styling options, Multi-page PDF, Specialized SVG).
+- Implement other Specialized Exports (Icon Sprite Sheets, Design Tokens JSON).
+- Further optimize performance for complex scenes and exports.
+- Implement detailed Quality Assurance checks (color fidelity, font consistency).
+- Implement remaining layer effects (Inner shadow, Blurs).
+- (Stretch Goals for future phases: Lottie export, Auto Layout, Components feature, Two-way Code Sync, Real-time Collaboration)
+
+This revised phase plan breaks down the features more logically by complexity and dependency, acknowledging that achieving "exactly like Figma" for core features like Frames and Groups is a significant undertaking that likely spans more than just the MVP. It also correctly places the Developer Handoff/Code Generation feature in a later phase, as it builds upon the core canvas functionality.
