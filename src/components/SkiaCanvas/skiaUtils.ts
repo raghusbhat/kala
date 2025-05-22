@@ -109,6 +109,7 @@ interface UtilCanvasKitCanvas {
     radius: number,
     paint: UtilCanvasKitPaint
   ) => void;
+  drawRect: (rect: any, paint: UtilCanvasKitPaint) => void;
   // Add other drawing methods if other utils need them
 }
 
@@ -116,6 +117,7 @@ interface UtilCanvasKitType {
   Paint: new () => UtilCanvasKitPaint;
   PaintStyle: { Fill: any; Stroke: any }; // Simplified
   Color4f: (r: number, g: number, b: number, a: number) => any;
+  LTRBRect: (left: number, top: number, right: number, bottom: number) => any;
 }
 
 export const drawFigmaHandle = (
@@ -128,25 +130,26 @@ export const drawFigmaHandle = (
   white: any,
   shadow: any
 ) => {
-  const shadowPaint = new canvasKit.Paint();
-  shadowPaint.setAntiAlias(true);
-  shadowPaint.setColor(shadow);
-  canvas.drawCircle(x, y, radius + 3, shadowPaint);
-  shadowPaint.delete();
-
+  // draw square handle with subtle border
   const fillPaint = new canvasKit.Paint();
   fillPaint.setAntiAlias(true);
   fillPaint.setColor(white);
   fillPaint.setStyle(canvasKit.PaintStyle.Fill);
-  canvas.drawCircle(x, y, radius, fillPaint);
+  canvas.drawRect(
+    canvasKit.LTRBRect(x - radius, y - radius, x + radius, y + radius),
+    fillPaint
+  );
   fillPaint.delete();
 
   const borderPaint = new canvasKit.Paint();
   borderPaint.setAntiAlias(true);
   borderPaint.setColor(blue);
   borderPaint.setStyle(canvasKit.PaintStyle.Stroke);
-  borderPaint.setStrokeWidth(2);
-  canvas.drawCircle(x, y, radius, borderPaint);
+  borderPaint.setStrokeWidth(1);
+  canvas.drawRect(
+    canvasKit.LTRBRect(x - radius, y - radius, x + radius, y + radius),
+    borderPaint
+  );
   borderPaint.delete();
 };
 

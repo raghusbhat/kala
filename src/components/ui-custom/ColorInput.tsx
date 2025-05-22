@@ -111,7 +111,9 @@ export default function ColorInput({
                       onChange={(e) => handleColorChange(e.target.value)}
                       className="border border-zinc-700 bg-zinc-800 text-xs font-mono rounded px-2 py-1 w-24 text-white focus:outline-none focus:ring-2 focus:ring-primary"
                     />
-                    <span className="ml-2 text-xs text-zinc-300">Opacity</span>
+                  </div>
+                  <div className="flex items-center mt-2 gap-2">
+                    <span className="text-xs text-zinc-300">Opacity</span>
                     <input
                       type="range"
                       min={0}
@@ -120,9 +122,22 @@ export default function ColorInput({
                       onChange={(e) =>
                         handleOpacityChange(Number(e.target.value))
                       }
-                      className="ml-2 accent-primary w-24"
+                      className="accent-primary w-24"
                     />
-                    <span className="ml-2 text-xs w-8 text-zinc-300">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={opacity}
+                      onChange={(e) => {
+                        const newValue = Number(e.target.value);
+                        if (newValue >= 0 && newValue <= 100) {
+                          handleOpacityChange(newValue);
+                        }
+                      }}
+                      className="border border-zinc-700 bg-zinc-800 text-xs font-mono rounded px-2 py-1 w-12 text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <span className="text-xs w-8 text-zinc-300">
                       {opacity}%
                     </span>
                   </div>
