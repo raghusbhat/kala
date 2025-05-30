@@ -20,8 +20,27 @@ export interface Dimensions {
   height: number;
 }
 
+export interface Shadow {
+  enabled: boolean;
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  spread: number;
+  color: string;
+}
+
+export interface CornerRadius {
+  topLeft: number;
+  topRight: number;
+  bottomLeft: number;
+  bottomRight: number;
+  independent: boolean; // Whether individual corners are being controlled
+}
+
 export interface Appearance {
   fill: string;
   stroke: string;
   strokeWidth: number;
+  shadow: Shadow;
+  cornerRadius: CornerRadius;
 }

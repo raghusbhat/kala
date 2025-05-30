@@ -1,4 +1,9 @@
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { DrawingTool } from "../SkiaCanvas/SkiaCanvas";
 import { IconType } from "react-icons";
 
@@ -7,6 +12,7 @@ interface ToolButtonProps {
   currentTool: DrawingTool;
   icon: IconType;
   onClick: () => void;
+  tooltip: string;
 }
 
 export default function ToolButton({
@@ -14,14 +20,27 @@ export default function ToolButton({
   currentTool,
   icon: Icon,
   onClick,
+  tooltip,
 }: ToolButtonProps) {
   return (
-    <Button
-      variant={currentTool === tool ? "default" : "secondary"}
-      size="icon"
-      onClick={onClick}
-    >
-      <Icon className="h-4 w-4" />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClick}
+          className={
+            currentTool === tool
+              ? "bg-primary/20 text-primary hover:bg-primary/30"
+              : "hover:bg-muted"
+          }
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{tooltip}</p>
+      </TooltipContent>
+    </Tooltip>
   );
 }

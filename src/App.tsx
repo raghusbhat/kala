@@ -9,8 +9,6 @@ import type { SkiaObjectDataForApp } from "./components/CanvasArea";
 import PropertiesSidebar from "./components/PropertiesSidebar";
 
 function App() {
-  console.log("🏗️ App component rendering");
-
   const [activeMode, setActiveMode] = useState<"design" | "dev">("design");
 
   // Use ref to prevent circular updates
@@ -25,42 +23,71 @@ function App() {
     appearance,
     addLayer,
     selectLayer,
+    deleteLayer,
     toggleLayerVisibility,
     toggleLayerLock,
     updatePosition,
     updateDimensions,
     updateAppearance,
+    updateShadow,
+    updateCornerRadius,
   } = useLayerStore();
-
-  console.log("📊 Layer store state:", {
-    layersCount: layers.length,
-    selectedLayerId,
-    position,
-    dimensions,
-    appearance,
-  });
 
   // Canvas store hooks
   const {
     objects: canvasObjects,
     updateObject: updateCanvasObject,
     addObject: addCanvasObject,
+    removeObject: removeCanvasObject,
   } = useCanvasStore();
-
-  console.log("🎨 Canvas store state:", {
-    objectsCount: canvasObjects.length,
-    objects: canvasObjects,
-  });
 
   const selectedLayer =
     layers.find((layer) => layer.id === selectedLayerId) || null;
 
-  console.log("🎯 Selected layer:", selectedLayer);
+  // Handle delete functionality
+  const handleDeleteObject = useCallback(() => {
+    if (!selectedLayerId) return;
+
+    // Find the canvas object index
+    const canvasObjectIndex = canvasObjects.findIndex(
+      (obj) => obj.id === selectedLayerId
+    );
+
+    if (canvasObjectIndex !== -1) {
+      const deletedObject = canvasObjects[canvasObjectIndex];
+      console.log(
+        `🗑️ Deleted object: ${deletedObject.type} (ID: ${deletedObject.id})`
+      );
+
+      // Remove from both stores
+      removeCanvasObject(canvasObjectIndex);
+      deleteLayer(selectedLayerId);
+    }
+  }, [selectedLayerId, canvasObjects, removeCanvasObject, deleteLayer]);
+
+  // Add keyboard shortcut for delete
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Only handle delete when there's a selected object and not in text input
+      if (
+        ((event.key === "Delete" || event.key === "Backspace") &&
+          selectedLayerId &&
+          !event.target) ||
+        (event.target &&
+          !(event.target as HTMLElement).tagName.match(/INPUT|TEXTAREA/))
+      ) {
+        event.preventDefault();
+        handleDeleteObject();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleDeleteObject, selectedLayerId]);
 
   // Function to handle object creation initiated from SkiaCanvas
   const handleSkiaObjectCreated = useCallback(
     (skiaData: SkiaObjectDataForApp) => {
-      console.log("SkiaCanvas created an object, App.tsx received:", skiaData);
       const layerId = addLayer(
         skiaData.type as "rectangle" | "ellipse" | "text"
       );
@@ -89,10 +116,6 @@ function App() {
       }
 
       addCanvasObject(fullCanvasObject);
-      console.log(
-        `Created layer ${layerId} and added to canvas store`,
-        fullCanvasObject
-      );
       return layerId;
     },
     [addLayer, addCanvasObject]
@@ -101,34 +124,22 @@ function App() {
   // Function to handle object selection from SkiaCanvas
   const handleSkiaObjectSelected = useCallback(
     (objectIndex: number | null) => {
-      console.log(
-        "🎯 handleSkiaObjectSelected called with index:",
-        objectIndex
-      );
-
       if (objectIndex === null) {
-        console.log(
-          "📤 No object selected, calling selectLayer with empty string"
-        );
         // No object selected
         selectLayer("");
         return;
       }
 
       const selectedObject = canvasObjects[objectIndex];
-      console.log("🔍 Selected object:", selectedObject);
 
       if (!selectedObject || !selectedObject.id) {
-        console.log("❌ No selected object or no ID, returning");
         return;
       }
 
       // Set flag to prevent circular updates
-      console.log("🚩 Setting isUpdatingFromCanvas flag to true");
       isUpdatingFromCanvas.current = true;
 
       // Select the layer in the layer store
-      console.log("📋 Calling selectLayer with ID:", selectedObject.id);
       selectLayer(selectedObject.id);
 
       // Update the layer store properties with the actual object values
@@ -138,14 +149,12 @@ function App() {
         endX: selectedObject.endX,
         endY: selectedObject.endY,
       };
-      console.log("📐 Calculated bounds:", bounds);
 
       const position = {
         x: bounds.startX,
         y: bounds.startY,
         rotation: selectedObject.rotation || 0,
       };
-      console.log("📍 Calculated position:", position);
 
       const dimensions = {
         width:
@@ -153,42 +162,51 @@ function App() {
         height:
           Math.abs(bounds.endY - bounds.startY) * (selectedObject.scaleY || 1),
       };
-      console.log("📏 Calculated dimensions:", dimensions);
 
       const appearance = {
         fill: selectedObject.fillColor || "#FFFFFF",
         stroke: selectedObject.strokeColor || "transparent",
         strokeWidth: selectedObject.strokeWidth || 0,
       };
-      console.log("🎨 Calculated appearance:", appearance);
 
       // Update the layer store with actual object properties
-      console.log("🔄 Starting layer store updates...");
-      console.log("📍 Updating position x:", position.x);
       updatePosition("x", position.x);
-      console.log("📍 Updating position y:", position.y);
       updatePosition("y", position.y);
-      console.log("📍 Updating rotation:", position.rotation);
       updatePosition("rotation", position.rotation);
-      console.log("📏 Updating width:", dimensions.width);
       updateDimensions("width", dimensions.width);
-      console.log("📏 Updating height:", dimensions.height);
       updateDimensions("height", dimensions.height);
-      console.log("🎨 Updating fill:", appearance.fill);
       updateAppearance("fill", appearance.fill);
-      console.log("🎨 Updating stroke:", appearance.stroke);
       updateAppearance("stroke", appearance.stroke);
-      console.log("🎨 Updating strokeWidth:", appearance.strokeWidth);
       updateAppearance("strokeWidth", appearance.strokeWidth);
 
+      // Update shadow properties
+      updateShadow("enabled", selectedObject.shadowEnabled || false);
+      updateShadow("offsetX", selectedObject.shadowOffsetX ?? 0);
+      updateShadow("offsetY", selectedObject.shadowOffsetY ?? 4);
+      updateShadow("blur", selectedObject.shadowBlur ?? 8);
+      updateShadow("spread", selectedObject.shadowSpread ?? 0);
+      updateShadow("color", selectedObject.shadowColor || "#000000");
+
+      // Update corner radius properties
+      updateCornerRadius("topLeft", selectedObject.cornerRadiusTopLeft ?? 0);
+      updateCornerRadius("topRight", selectedObject.cornerRadiusTopRight ?? 0);
+      updateCornerRadius(
+        "bottomLeft",
+        selectedObject.cornerRadiusBottomLeft ?? 0
+      );
+      updateCornerRadius(
+        "bottomRight",
+        selectedObject.cornerRadiusBottomRight ?? 0
+      );
+      updateCornerRadius(
+        "independent",
+        selectedObject.cornerRadiusIndependent ?? false
+      );
+
       // Reset flag after a brief delay to allow all updates to complete
-      console.log("⏱️ Setting timeout to reset flag");
       setTimeout(() => {
-        console.log("🚩 Resetting isUpdatingFromCanvas flag to false");
         isUpdatingFromCanvas.current = false;
       }, 0);
-
-      console.log("✅ handleSkiaObjectSelected completed");
     },
     [
       canvasObjects,
@@ -196,68 +214,45 @@ function App() {
       updatePosition,
       updateDimensions,
       updateAppearance,
+      updateShadow,
+      updateCornerRadius,
     ]
   );
 
   // Handle position changes from property panel
   const handlePositionChange = useCallback(
     (axis: "x" | "y" | "rotation", value: string) => {
-      console.log(
-        `🎛️ handlePositionChange called: ${axis} = ${value}, isUpdatingFromCanvas: ${isUpdatingFromCanvas.current}`
-      );
-
       updatePosition(axis, value);
 
       // Only update canvas if this is a user input, not a canvas selection update
       if (!isUpdatingFromCanvas.current && selectedLayerId) {
-        console.log(
-          "🎯 Updating canvas object position for selectedLayerId:",
-          selectedLayerId
-        );
-
         const canvasObjectIndex = canvasObjects.findIndex(
           (obj) => obj.id === selectedLayerId
         );
-
-        console.log("📍 Found canvas object at index:", canvasObjectIndex);
 
         if (canvasObjectIndex !== -1) {
           const currentObj = canvasObjects[canvasObjectIndex];
           const numValue = parseFloat(value);
 
-          console.log("📊 Current object:", currentObj);
-          console.log("🔢 Parsed value:", numValue);
-
           if (axis === "x") {
             const width = currentObj.endX - currentObj.startX;
-            console.log("📐 Updating X position, width:", width);
             updateCanvasObject(canvasObjectIndex, {
               startX: numValue,
               endX: numValue + width,
             });
           } else if (axis === "y") {
             const height = currentObj.endY - currentObj.startY;
-            console.log("📐 Updating Y position, height:", height);
             updateCanvasObject(canvasObjectIndex, {
               startY: numValue,
               endY: numValue + height,
             });
           } else if (axis === "rotation") {
-            console.log("🔄 Updating rotation to:", numValue);
             updateCanvasObject(canvasObjectIndex, {
               rotation: numValue,
             });
           }
         }
-      } else if (isUpdatingFromCanvas.current) {
-        console.log(
-          "🚫 Skipping canvas update because isUpdatingFromCanvas is true"
-        );
-      } else if (!selectedLayerId) {
-        console.log("🚫 Skipping canvas update because no selectedLayerId");
       }
-
-      console.log("✅ handlePositionChange completed");
     },
     [updatePosition, selectedLayerId, canvasObjects, updateCanvasObject]
   );
@@ -265,53 +260,29 @@ function App() {
   // Handle dimension changes from property panel
   const handleDimensionsChange = useCallback(
     (dimension: "width" | "height", value: string) => {
-      console.log(
-        `📏 handleDimensionsChange called: ${dimension} = ${value}, isUpdatingFromCanvas: ${isUpdatingFromCanvas.current}`
-      );
-
       updateDimensions(dimension, value);
 
       // Only update canvas if this is a user input, not a canvas selection update
       if (!isUpdatingFromCanvas.current && selectedLayerId) {
-        console.log(
-          "🎯 Updating canvas object dimensions for selectedLayerId:",
-          selectedLayerId
-        );
-
         const canvasObjectIndex = canvasObjects.findIndex(
           (obj) => obj.id === selectedLayerId
         );
-
-        console.log("📍 Found canvas object at index:", canvasObjectIndex);
 
         if (canvasObjectIndex !== -1) {
           const currentObj = canvasObjects[canvasObjectIndex];
           const numValue = parseFloat(value);
 
-          console.log("📊 Current object:", currentObj);
-          console.log("🔢 Parsed value:", numValue);
-
           if (dimension === "width") {
-            console.log("📐 Updating width");
             updateCanvasObject(canvasObjectIndex, {
               endX: currentObj.startX + numValue,
             });
           } else if (dimension === "height") {
-            console.log("📐 Updating height");
             updateCanvasObject(canvasObjectIndex, {
               endY: currentObj.startY + numValue,
             });
           }
         }
-      } else if (isUpdatingFromCanvas.current) {
-        console.log(
-          "🚫 Skipping canvas update because isUpdatingFromCanvas is true"
-        );
-      } else if (!selectedLayerId) {
-        console.log("🚫 Skipping canvas update because no selectedLayerId");
       }
-
-      console.log("✅ handleDimensionsChange completed");
     },
     [updateDimensions, selectedLayerId, canvasObjects, updateCanvasObject]
   );
@@ -319,24 +290,13 @@ function App() {
   // Wrapper for layer store's updateAppearance to also trigger canvas update
   const handleAppearanceChange = useCallback(
     (property: "fill" | "stroke" | "strokeWidth", value: string | number) => {
-      console.log(
-        `🎨 handleAppearanceChange called: ${property} = ${value}, isUpdatingFromCanvas: ${isUpdatingFromCanvas.current}`
-      );
-
       updateAppearance(property, value);
 
       // Only update canvas if this is a user input, not a canvas selection update
       if (!isUpdatingFromCanvas.current && selectedLayerId) {
-        console.log(
-          "🎯 Updating canvas object appearance for selectedLayerId:",
-          selectedLayerId
-        );
-
         const canvasObjectIndex = canvasObjects.findIndex(
           (obj) => obj.id === selectedLayerId
         );
-
-        console.log("📍 Found canvas object at index:", canvasObjectIndex);
 
         if (canvasObjectIndex !== -1) {
           const updates: Partial<CanvasObject> = {};
@@ -350,31 +310,133 @@ function App() {
               typeof value === "string" ? parseFloat(value) : value;
           }
 
-          console.log("🔄 Updating canvas object with:", updates);
           updateCanvasObject(canvasObjectIndex, updates);
         }
-      } else if (isUpdatingFromCanvas.current) {
-        console.log(
-          "🚫 Skipping canvas update because isUpdatingFromCanvas is true"
-        );
-      } else if (!selectedLayerId) {
-        console.log("🚫 Skipping canvas update because no selectedLayerId");
       }
-
-      console.log("✅ handleAppearanceChange completed");
     },
     [updateAppearance, selectedLayerId, canvasObjects, updateCanvasObject]
   );
 
+  // Handle shadow changes from property panel
+  const handleShadowChange = useCallback(
+    (
+      property: "enabled" | "offsetX" | "offsetY" | "blur" | "spread" | "color",
+      value: string | number | boolean
+    ) => {
+      updateShadow(property, value);
+
+      // Only update canvas if this is a user input, not a canvas selection update
+      if (!isUpdatingFromCanvas.current && selectedLayerId) {
+        const canvasObjectIndex = canvasObjects.findIndex(
+          (obj) => obj.id === selectedLayerId
+        );
+
+        if (canvasObjectIndex !== -1) {
+          const currentObj = canvasObjects[canvasObjectIndex];
+          const updates: Partial<CanvasObject> = {};
+
+          if (property === "enabled") {
+            updates.shadowEnabled = value as boolean;
+
+            // When enabling shadow, apply default values if they don't exist
+            if (value === true) {
+              if (currentObj.shadowOffsetX === undefined)
+                updates.shadowOffsetX = 0;
+              if (currentObj.shadowOffsetY === undefined)
+                updates.shadowOffsetY = 4;
+              if (currentObj.shadowBlur === undefined) updates.shadowBlur = 8;
+              if (currentObj.shadowSpread === undefined)
+                updates.shadowSpread = 0;
+              if (!currentObj.shadowColor) updates.shadowColor = "#000000";
+
+              // Also update the layer store with defaults
+              if (currentObj.shadowOffsetX === undefined)
+                updateShadow("offsetX", 0);
+              if (currentObj.shadowOffsetY === undefined)
+                updateShadow("offsetY", 4);
+              if (currentObj.shadowBlur === undefined) updateShadow("blur", 8);
+              if (currentObj.shadowSpread === undefined)
+                updateShadow("spread", 0);
+              if (!currentObj.shadowColor) updateShadow("color", "#000000");
+            }
+          } else if (property === "offsetX") {
+            updates.shadowOffsetX =
+              typeof value === "string" ? parseFloat(value) : (value as number);
+          } else if (property === "offsetY") {
+            updates.shadowOffsetY =
+              typeof value === "string" ? parseFloat(value) : (value as number);
+          } else if (property === "blur") {
+            updates.shadowBlur =
+              typeof value === "string" ? parseFloat(value) : (value as number);
+          } else if (property === "spread") {
+            updates.shadowSpread =
+              typeof value === "string" ? parseFloat(value) : (value as number);
+          } else if (property === "color") {
+            updates.shadowColor = value.toString();
+          }
+
+          updateCanvasObject(canvasObjectIndex, updates);
+        }
+      }
+    },
+    [updateShadow, selectedLayerId, canvasObjects, updateCanvasObject]
+  );
+
+  // Handle corner radius changes from property panel
+  const handleCornerRadiusChange = useCallback(
+    (
+      property:
+        | "topLeft"
+        | "topRight"
+        | "bottomLeft"
+        | "bottomRight"
+        | "independent"
+        | "all",
+      value: number | boolean
+    ) => {
+      updateCornerRadius(property, value);
+
+      // Only update canvas if this is a user input, not a canvas selection update
+      if (!isUpdatingFromCanvas.current && selectedLayerId) {
+        const canvasObjectIndex = canvasObjects.findIndex(
+          (obj) => obj.id === selectedLayerId
+        );
+
+        if (canvasObjectIndex !== -1) {
+          const updates: Partial<CanvasObject> = {};
+
+          if (property === "independent") {
+            updates.cornerRadiusIndependent = value as boolean;
+          } else if (property === "all") {
+            // Update all corners to the same value
+            const numValue = value as number;
+            updates.cornerRadiusTopLeft = numValue;
+            updates.cornerRadiusTopRight = numValue;
+            updates.cornerRadiusBottomLeft = numValue;
+            updates.cornerRadiusBottomRight = numValue;
+          } else if (property === "topLeft") {
+            updates.cornerRadiusTopLeft = value as number;
+          } else if (property === "topRight") {
+            updates.cornerRadiusTopRight = value as number;
+          } else if (property === "bottomLeft") {
+            updates.cornerRadiusBottomLeft = value as number;
+          } else if (property === "bottomRight") {
+            updates.cornerRadiusBottomRight = value as number;
+          }
+
+          updateCanvasObject(canvasObjectIndex, updates);
+        }
+      }
+    },
+    [updateCornerRadius, selectedLayerId, canvasObjects, updateCanvasObject]
+  );
+
   const handleLayerVisibilityToggle = useCallback(
     (layerId: string) => {
-      console.log("👁️ handleLayerVisibilityToggle called with:", layerId);
       toggleLayerVisibility(layerId);
     },
     [toggleLayerVisibility]
   );
-
-  console.log("🔄 About to return JSX, preparing render");
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
@@ -400,6 +462,9 @@ function App() {
           onAppearanceChange={handleAppearanceChange}
           onToggleLayerVisibility={handleLayerVisibilityToggle}
           onToggleLayerLock={toggleLayerLock}
+          onShadowChange={handleShadowChange}
+          onCornerRadiusChange={handleCornerRadiusChange}
+          onDeleteObject={handleDeleteObject}
         />
       </div>
     </div>

@@ -27,7 +27,7 @@
 
     /* Canvas specific */
     --canvas-bg: 0 0% 10%; /* Slightly lighter than background */
-    --toolbar-bg: 240 10% 12%;
+    --toolbar-bg: 240 10% 5.9%; /* Same as --card for consistency with header */
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;

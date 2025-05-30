@@ -14,6 +14,7 @@ interface LayerState {
   // Actions
   addLayer: (type: "rectangle" | "ellipse" | "text") => string;
   selectLayer: (id: string) => void;
+  deleteLayer: (id: string) => void;
   toggleLayerVisibility: (id: string) => void;
   toggleLayerLock: (id: string) => void;
   updatePosition: (
@@ -28,6 +29,20 @@ interface LayerState {
     property: "fill" | "stroke" | "strokeWidth",
     value: string | number
   ) => void;
+  updateShadow: (
+    property: "enabled" | "offsetX" | "offsetY" | "blur" | "spread" | "color",
+    value: string | number | boolean
+  ) => void;
+  updateCornerRadius: (
+    property:
+      | "topLeft"
+      | "topRight"
+      | "bottomLeft"
+      | "bottomRight"
+      | "independent"
+      | "all",
+    value: number | boolean
+  ) => void;
 }
 
 export const useLayerStore = create<LayerState>((set) => ({
@@ -41,6 +56,21 @@ export const useLayerStore = create<LayerState>((set) => ({
     fill: "#FFFFFF",
     stroke: "transparent",
     strokeWidth: 2,
+    shadow: {
+      enabled: false,
+      offsetX: 0,
+      offsetY: 4,
+      blur: 8,
+      spread: 0,
+      color: "#000000",
+    },
+    cornerRadius: {
+      topLeft: 0,
+      topRight: 0,
+      bottomLeft: 0,
+      bottomRight: 0,
+      independent: false,
+    },
   },
 
   // Actions
@@ -74,6 +104,21 @@ export const useLayerStore = create<LayerState>((set) => ({
           fill: "#FFFFFF",
           stroke: "transparent",
           strokeWidth: 2,
+          shadow: {
+            enabled: false,
+            offsetX: 0,
+            offsetY: 4,
+            blur: 8,
+            spread: 0,
+            color: "#000000",
+          },
+          cornerRadius: {
+            topLeft: 0,
+            topRight: 0,
+            bottomLeft: 0,
+            bottomRight: 0,
+            independent: false,
+          },
         };
       } else if (type === "ellipse") {
         newDimensions = { width: 247, height: 233 };
@@ -82,6 +127,21 @@ export const useLayerStore = create<LayerState>((set) => ({
           fill: "#FFFFFF",
           stroke: "transparent",
           strokeWidth: 2,
+          shadow: {
+            enabled: false,
+            offsetX: 0,
+            offsetY: 4,
+            blur: 8,
+            spread: 0,
+            color: "#000000",
+          },
+          cornerRadius: {
+            topLeft: 0,
+            topRight: 0,
+            bottomLeft: 0,
+            bottomRight: 0,
+            independent: false,
+          },
         };
       } else if (type === "text") {
         newDimensions = { width: 120, height: 30 };
@@ -90,6 +150,21 @@ export const useLayerStore = create<LayerState>((set) => ({
           fill: "#FFFFFF",
           stroke: "transparent",
           strokeWidth: 0,
+          shadow: {
+            enabled: false,
+            offsetX: 0,
+            offsetY: 4,
+            blur: 8,
+            spread: 0,
+            color: "#000000",
+          },
+          cornerRadius: {
+            topLeft: 0,
+            topRight: 0,
+            bottomLeft: 0,
+            bottomRight: 0,
+            independent: false,
+          },
         };
       }
 
@@ -131,6 +206,21 @@ export const useLayerStore = create<LayerState>((set) => ({
           selected: l.id === id,
         })),
         selectedLayerId: id,
+      };
+    });
+  },
+
+  deleteLayer: (id) => {
+    set((state) => {
+      const newLayers = state.layers.filter((layer) => layer.id !== id);
+
+      // If the deleted layer was selected, clear selection
+      const newSelectedLayerId =
+        state.selectedLayerId === id ? null : state.selectedLayerId;
+
+      return {
+        layers: newLayers,
+        selectedLayerId: newSelectedLayerId,
       };
     });
   },
@@ -193,5 +283,63 @@ export const useLayerStore = create<LayerState>((set) => ({
         },
       }));
     }
+  },
+
+  updateShadow: (property, value) => {
+    set((state) => ({
+      appearance: {
+        ...state.appearance,
+        shadow: {
+          ...state.appearance.shadow,
+          [property]: value,
+        },
+      },
+    }));
+  },
+
+  updateCornerRadius: (property, value) => {
+    set((state) => {
+      const currentCornerRadius = state.appearance.cornerRadius;
+
+      if (property === "independent") {
+        return {
+          appearance: {
+            ...state.appearance,
+            cornerRadius: {
+              ...currentCornerRadius,
+              independent: value as boolean,
+            },
+          },
+        };
+      }
+
+      if (property === "all") {
+        // Update all corners to the same value
+        const numValue = value as number;
+        return {
+          appearance: {
+            ...state.appearance,
+            cornerRadius: {
+              ...currentCornerRadius,
+              topLeft: numValue,
+              topRight: numValue,
+              bottomLeft: numValue,
+              bottomRight: numValue,
+            },
+          },
+        };
+      }
+
+      // Update individual corner
+      return {
+        appearance: {
+          ...state.appearance,
+          cornerRadius: {
+            ...currentCornerRadius,
+            [property]: value as number,
+          },
+        },
+      };
+    });
   },
 }));

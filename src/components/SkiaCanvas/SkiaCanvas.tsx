@@ -151,6 +151,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       currentColor,
       currentStrokeColor,
       strokeWidth,
+      canvasBackgroundColor,
       // Actions
       setCurrentTool,
       addObject,
@@ -422,7 +423,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         return;
 
       const canvas = drawingStateRef.current.canvas;
-      canvas.clear(ck.BLACK);
+      const bgColor = hexToRgba(canvasBackgroundColor);
+      canvas.clear(ck.Color4f(bgColor.r, bgColor.g, bgColor.b, bgColor.a));
 
       canvas.save(); // Global transform save
       canvas.translate(offset.x, offset.y);
@@ -479,12 +481,217 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           obj.endY
         );
 
+        // Draw shadow if enabled
+        if (obj.shadowEnabled && obj.shadowBlur && obj.shadowBlur > 0) {
+          const shadowPaint = new ck.Paint();
+          shadowPaint.setAntiAlias(true);
+
+          // Parse shadow color
+          const shadowColor = obj.shadowColor || "rgba(0, 0, 0, 0.25)";
+          const shadowColorRgba = hexToRgba(shadowColor);
+          shadowPaint.setColor(
+            ck.Color4f(
+              shadowColorRgba.r,
+              shadowColorRgba.g,
+              shadowColorRgba.b,
+              shadowColorRgba.a
+            )
+          );
+          shadowPaint.setStyle(ck.PaintStyle.Fill);
+
+          // Create blur mask filter for shadow
+          const blurFilter = ck.MaskFilter.MakeBlur(
+            ck.BlurStyle.Normal,
+            obj.shadowBlur / 2, // Skia blur radius is typically half the desired blur
+            true
+          );
+          shadowPaint.setMaskFilter(blurFilter);
+
+          // Calculate shadow bounds with offset and spread
+          const shadowOffsetX = obj.shadowOffsetX || 0;
+          const shadowOffsetY = obj.shadowOffsetY || 4;
+          const shadowSpread = obj.shadowSpread || 0;
+
+          // Apply spread by expanding/contracting the bounds
+          const shadowBounds = ck.LTRBRect(
+            obj.startX + shadowOffsetX - shadowSpread,
+            obj.startY + shadowOffsetY - shadowSpread,
+            obj.endX + shadowOffsetX + shadowSpread,
+            obj.endY + shadowOffsetY + shadowSpread
+          );
+
+          // Draw shadow shape
+          if (obj.type === "rectangle") {
+            canvas.drawRect(shadowBounds, shadowPaint);
+          } else if (obj.type === "ellipse") {
+            canvas.drawOval(shadowBounds, shadowPaint);
+          } else if (obj.type === "text" && obj.text && fontMgr) {
+            // For text, draw shadow text (spread affects the text position)
+            try {
+              const typeface = fontMgr.matchFamilyStyle("Roboto", {
+                weight: ck.FontWeight.Normal,
+                width: ck.FontWidth.Normal,
+                slant: ck.FontSlant.Upright,
+              });
+              if (typeface) {
+                const font = new ck.Font(typeface, obj.fontSize || 20);
+                canvas.drawText(
+                  obj.text,
+                  obj.startX + shadowOffsetX,
+                  obj.startY + shadowOffsetY + (obj.fontSize || 20) * 0.75,
+                  shadowPaint,
+                  font
+                );
+                font.delete();
+              }
+            } catch (e) {
+              console.warn("Failed to render shadow for text:", e);
+            }
+          } else if (obj.type === "pen" && obj.path) {
+            // For pen, draw shadow path with offset and spread
+            shadowPaint.setStyle(ck.PaintStyle.Stroke);
+            shadowPaint.setStrokeWidth(
+              (obj.strokeWidth || 2) + shadowSpread * 2
+            );
+            shadowPaint.setStrokeJoin(ck.StrokeJoin.Round);
+            shadowPaint.setStrokeCap(ck.StrokeCap.Round);
+
+            // Create a copy of the path and transform it
+            const shadowPath = obj.path.copy();
+            const shadowTransform = ck.Matrix.identity();
+            shadowTransform[2] = shadowOffsetX; // translate X
+            shadowTransform[5] = shadowOffsetY; // translate Y
+            shadowPath.transform(shadowTransform);
+
+            canvas.drawPath(shadowPath, shadowPaint);
+            shadowPath.delete();
+          }
+
+          shadowPaint.delete();
+          blurFilter?.delete();
+        }
+
         // Draw the main object
         if (obj.type === "rectangle") {
-          if (fillPaint.getColor()[3] > 0.001)
-            canvas.drawRect(rectBounds, fillPaint);
-          if (strokePaint.getColor()[3] > 0.001 && (obj.strokeWidth || 0) > 0)
-            canvas.drawRect(rectBounds, strokePaint);
+          // Check if we need rounded corners
+          const hasCornerRadius =
+            obj.cornerRadiusTopLeft ||
+            obj.cornerRadiusTopRight ||
+            obj.cornerRadiusBottomLeft ||
+            obj.cornerRadiusBottomRight;
+
+          if (hasCornerRadius) {
+            // Check if all corners are the same (simple rounded rectangle)
+            const topLeft = obj.cornerRadiusTopLeft || 0;
+            const topRight = obj.cornerRadiusTopRight || 0;
+            const bottomLeft = obj.cornerRadiusBottomLeft || 0;
+            const bottomRight = obj.cornerRadiusBottomRight || 0;
+
+            if (
+              topLeft === topRight &&
+              topRight === bottomLeft &&
+              bottomLeft === bottomRight
+            ) {
+              // Simple rounded rectangle - all corners same radius
+              const roundedRect = ck.RRectXY(rectBounds, topLeft, topLeft);
+
+              if (fillPaint.getColor()[3] > 0.001) {
+                canvas.drawRRect(roundedRect, fillPaint);
+              }
+              if (
+                strokePaint.getColor()[3] > 0.001 &&
+                (obj.strokeWidth || 0) > 0
+              ) {
+                canvas.drawRRect(roundedRect, strokePaint);
+              }
+            } else {
+              // Individual corner radii - create manual path
+              const path = new ck.Path();
+              const left = obj.startX;
+              const top = obj.startY;
+              const right = obj.endX;
+              const bottom = obj.endY;
+
+              // Start from top-left, going clockwise
+              path.moveTo(left + topLeft, top);
+
+              // Top edge and top-right corner
+              path.lineTo(right - topRight, top);
+              if (topRight > 0) {
+                path.arcToRotated(
+                  topRight,
+                  topRight,
+                  0,
+                  false,
+                  true,
+                  right,
+                  top + topRight
+                );
+              }
+
+              // Right edge and bottom-right corner
+              path.lineTo(right, bottom - bottomRight);
+              if (bottomRight > 0) {
+                path.arcToRotated(
+                  bottomRight,
+                  bottomRight,
+                  0,
+                  false,
+                  true,
+                  right - bottomRight,
+                  bottom
+                );
+              }
+
+              // Bottom edge and bottom-left corner
+              path.lineTo(left + bottomLeft, bottom);
+              if (bottomLeft > 0) {
+                path.arcToRotated(
+                  bottomLeft,
+                  bottomLeft,
+                  0,
+                  false,
+                  true,
+                  left,
+                  bottom - bottomLeft
+                );
+              }
+
+              // Left edge and top-left corner
+              path.lineTo(left, top + topLeft);
+              if (topLeft > 0) {
+                path.arcToRotated(
+                  topLeft,
+                  topLeft,
+                  0,
+                  false,
+                  true,
+                  left + topLeft,
+                  top
+                );
+              }
+
+              path.close();
+
+              if (fillPaint.getColor()[3] > 0.001) {
+                canvas.drawPath(path, fillPaint);
+              }
+              if (
+                strokePaint.getColor()[3] > 0.001 &&
+                (obj.strokeWidth || 0) > 0
+              ) {
+                canvas.drawPath(path, strokePaint);
+              }
+
+              path.delete();
+            }
+          } else {
+            // Regular rectangle
+            if (fillPaint.getColor()[3] > 0.001)
+              canvas.drawRect(rectBounds, fillPaint);
+            if (strokePaint.getColor()[3] > 0.001 && (obj.strokeWidth || 0) > 0)
+              canvas.drawRect(rectBounds, strokePaint);
+          }
         } else if (obj.type === "ellipse") {
           if (fillPaint.getColor()[3] > 0.001)
             canvas.drawOval(rectBounds, fillPaint);
@@ -692,6 +899,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       currentColor,
       currentStrokeColor,
       strokeWidth,
+      canvasBackgroundColor,
       isDrawing,
       hoveredObjectIndex, // Removed from here, handled by its own useEffect
       drawSelectionHandlesInternal,
@@ -866,10 +1074,12 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       drawingStateRef.current.surface = surface;
       drawingStateRef.current.canvas = canvas;
 
-      canvas.clear(ck.BLACK);
+      const bgColorInit = hexToRgba(canvasBackgroundColor);
+      canvas.clear(
+        ck.Color4f(bgColorInit.r, bgColorInit.g, bgColorInit.b, bgColorInit.a)
+      );
       surface.flush();
       redraw();
-      surface.flush(); // initial flush after clear
 
       return () => {
         if (drawingStateRef.current.surface === surface) {
@@ -1318,13 +1528,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
             if (onObjectCreated) {
               const layerId = onObjectCreated(completeObjectData);
-              console.log(
-                `[SkiaCanvas] Created object: ${completeObjectData.type}`
-              );
             } else {
               const id = `${Date.now()}-${Math.random()}`;
               const objWithId = { ...completeObjectData, id };
-              console.log(`[SkiaCanvas] Added object: ${objWithId.type}`);
               addObject(objWithId as any);
             }
             setCurrentTool("select");

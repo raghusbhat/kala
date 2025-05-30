@@ -30,6 +30,19 @@ export interface BaseObject {
   path?: Path;
   text?: string;
   fontSize?: number;
+  // Shadow properties
+  shadowEnabled?: boolean;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+  shadowBlur?: number;
+  shadowSpread?: number;
+  shadowColor?: string;
+  // Corner radius properties
+  cornerRadiusTopLeft?: number;
+  cornerRadiusTopRight?: number;
+  cornerRadiusBottomLeft?: number;
+  cornerRadiusBottomRight?: number;
+  cornerRadiusIndependent?: boolean;
 }
 
 export interface ShapeObject extends BaseObject {
@@ -56,6 +69,10 @@ interface CanvasState {
   offset: { x: number; y: number };
   setScale: (scale: number) => void;
   setOffset: (offset: { x: number; y: number }) => void;
+
+  // Canvas properties
+  canvasBackgroundColor: string;
+  setCanvasBackgroundColor: (color: string) => void;
 
   // Text tool
   textPosition: { x: number; y: number };
@@ -92,6 +109,10 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   offset: { x: 0, y: 0 },
   setScale: (scale) => set({ scale }),
   setOffset: (offset) => set({ offset }),
+
+  // Canvas properties
+  canvasBackgroundColor: "#1E1E1E",
+  setCanvasBackgroundColor: (color) => set({ canvasBackgroundColor: color }),
 
   // Text tool
   textPosition: { x: 0, y: 0 },
