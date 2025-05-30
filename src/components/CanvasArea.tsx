@@ -17,23 +17,38 @@ import FloatingToolbar from "./ui-custom/FloatingToolbar";
 import { useCanvasStore } from "../lib/store";
 import type { CanvasObject } from "../lib/store";
 
-export type SkiaObjectDataForApp = Omit<CanvasObject, "id"> & { text?: string; fontSize?: number };
+export type SkiaObjectDataForApp = Omit<CanvasObject, "id"> & {
+  text?: string;
+  fontSize?: number;
+};
 
 interface CanvasAreaProps {
   onObjectCreated: (objectData: SkiaObjectDataForApp) => string;
+  onObjectSelected?: (objectIndex: number | null) => void;
 }
 
-export default function CanvasArea({ onObjectCreated }: CanvasAreaProps) {
+export default function CanvasArea({
+  onObjectCreated,
+  onObjectSelected,
+}: CanvasAreaProps) {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const skiaCanvasRef = useRef<any>(null);
 
-  const { currentTool, setCurrentTool } = useCanvasStore();
+  const { currentTool, setCurrentTool, scale, setScale } = useCanvasStore();
 
   const handleToolChange = (tool: string) => {
     setCurrentTool(tool as DrawingTool);
   };
 
-  const handleZoom = (_direction: "in" | "out") => {
-    // Zoom direction: in or out
+  const handleZoom = (direction: "in" | "out") => {
+    const factor = direction === "in" ? 1.2 : 0.8;
+    const newScale = Math.max(0.1, Math.min(scale * factor, 5));
+    setScale(newScale);
+
+    // Force redraw after scale change
+    if (skiaCanvasRef.current?.redraw) {
+      setTimeout(() => skiaCanvasRef.current.redraw(), 0);
+    }
   };
 
   return (
@@ -93,7 +108,11 @@ export default function CanvasArea({ onObjectCreated }: CanvasAreaProps) {
         </FloatingToolbar>
 
         <div className="absolute top-0 left-0 right-0 bottom-0">
-          <SkiaCanvas onObjectCreated={onObjectCreated} />
+          <SkiaCanvas
+            ref={skiaCanvasRef}
+            onObjectCreated={onObjectCreated}
+            onObjectSelected={onObjectSelected}
+          />
         </div>
       </div>
     </main>

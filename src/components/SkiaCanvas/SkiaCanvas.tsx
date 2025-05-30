@@ -83,6 +83,7 @@ interface Handle {
 
 interface SkiaCanvasProps {
   onObjectCreated?: (objectData: SkiaObjectDataForApp) => string;
+  onObjectSelected?: (objectIndex: number | null) => void;
 }
 
 interface SkiaCanvasRefType {
@@ -115,10 +116,21 @@ interface DrawingState {
   dragStartObject: SkiaObjectDataForApp | null;
   dragStartPivotWorld: { x: number; y: number } | null;
   dragStartHandleWorld: { x: number; y: number } | null;
+  isObjectDragging: boolean;
+  dragStartObjectPosition: {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  } | null;
+  dragStartMouse: { x: number; y: number } | null;
 }
 
 const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
-  ({ onObjectCreated }, ref: ForwardedRef<SkiaCanvasRefType>): ReactNode => {
+  (
+    { onObjectCreated, onObjectSelected },
+    ref: ForwardedRef<SkiaCanvasRefType>
+  ): ReactNode => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -149,8 +161,19 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       setScale: setScaleAction,
     } = useCanvasStore();
 
+    // Manage object selection locally in this component
+    const [selectedObjectIndex, setSelectedObjectIndex] = useState<
+      number | null
+    >(null);
+
+    // Notify parent component when selection changes
+    useEffect(() => {
+      if (onObjectSelected) {
+        onObjectSelected(selectedObjectIndex);
+      }
+    }, [selectedObjectIndex, onObjectSelected]);
+
     if (!updateObject) {
-      console.error("updateObject is not available in the store");
       return null;
     }
 
@@ -185,6 +208,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       dragStartObject: null,
       dragStartPivotWorld: null,
       dragStartHandleWorld: null,
+      isObjectDragging: false,
+      dragStartObjectPosition: null,
+      dragStartMouse: null,
     });
 
     const [hoveredObjectIndex, setHoveredObjectIndex] = useState<number | null>(
@@ -502,7 +528,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         if (
           currentTool === "select" &&
           index === hoveredObjectIndex &&
-          index !== drawingStateRef.current.selectedObjectIndex
+          index !== selectedObjectIndex
         ) {
           const hoverPaint = new ck.Paint();
           hoverPaint.setAntiAlias(true);
@@ -553,7 +579,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       // around the object's transformed bounding box.
       if (
         hoveredObjectIndex !== null &&
-        hoveredObjectIndex !== drawingStateRef.current.selectedObjectIndex &&
+        hoveredObjectIndex !== selectedObjectIndex &&
         (currentTool === "none" || currentTool === "select")
       ) {
         const obj = storeObjects[hoveredObjectIndex];
@@ -592,9 +618,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       }
 
       // 3. Draw Selection Handles (for selected object)
-      if (drawingStateRef.current.selectedObjectIndex !== null) {
-        const selectedObj =
-          storeObjects[drawingStateRef.current.selectedObjectIndex];
+      if (selectedObjectIndex !== null) {
+        const selectedObj = storeObjects[selectedObjectIndex];
         if (selectedObj) {
           activeSelectionHandles = drawSelectionHandlesInternal(
             canvas,
@@ -617,7 +642,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         lfP.setAntiAlias(true);
         const { r: fr, g: fg, b: fb, a: fa } = hexToRgba(currentColor);
         lfP.setColor(ck.Color4f(fr, fg, fb, fa));
-        lfP.setStyle(ck.PaintStyle.Fill);
         const lsP = new ck.Paint();
         lsP.setAntiAlias(true);
         const { r: sr, g: sg, b: sb, a: sa } = hexToRgba(currentStrokeColor); // Use currentStrokeColor for preview stroke
@@ -671,13 +695,24 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       isDrawing,
       hoveredObjectIndex, // Removed from here, handled by its own useEffect
       drawSelectionHandlesInternal,
+      selectedObjectIndex,
     ]);
 
     useLayoutEffect(() => {
       if (ck && drawingStateRef.current.canvas) {
         redraw();
       }
-    }, [ck, fontMgr, redraw, storeObjects, offset, scale, currentTool]); // Removed hoveredObjectIndex from here
+    }, [
+      ck,
+      fontMgr,
+      redraw,
+      storeObjects,
+      offset,
+      scale,
+      currentTool,
+      selectedObjectIndex,
+      isDragging,
+    ]);
 
     useEffect(() => {
       textToolActiveRef.current = currentTool === "text";
@@ -748,34 +783,34 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             try {
               const loadedCK = await CanvasKitInit({
                 locateFile: (file) => `/canvaskit/${file}`,
-              }).catch(() =>
-                CanvasKitInit({
+              }).catch(() => {
+                return CanvasKitInit({
                   locateFile: (file) =>
                     `https://unpkg.com/canvaskit-wasm@0.38.0/bin/${file}`,
-                })
-              );
+                });
+              });
               const fontData = await fetch(
                 "https://storage.googleapis.com/skia-cdn/misc/Roboto-Regular.ttf"
               ).then((res) => res.arrayBuffer());
               const loadedFM = loadedCK.FontMgr.FromData(fontData);
-              if (!loadedFM) throw new Error("Font manager creation failed");
+              if (!loadedFM) {
+                throw new Error("Font manager creation failed");
+              }
               canvasKitInstance = loadedCK;
               fontManagerInstance = loadedFM;
               return { ck: loadedCK, fm: loadedFM };
             } catch (error) {
-              console.error("Global CK/FM init failed:", error);
               canvasKitPromise = null;
               throw error;
             }
           })();
+        } else {
         }
         try {
           const { ck: resolvedCK, fm: resolvedFM } = await canvasKitPromise;
           setCk(resolvedCK);
           setFontMgr(resolvedFM);
-        } catch (error) {
-          /* Already logged */
-        }
+        } catch (error) {}
       };
       init();
     }, []);
@@ -784,17 +819,23 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       if (
         currentTool === "select" &&
         storeObjects.length > 0 &&
-        drawingStateRef.current.selectedObjectIndex === null &&
+        selectedObjectIndex === null &&
         ck
       ) {
         // Problematic auto-selection: If the user explicitly deselects all items
         // (selectedObjectIndex becomes null) while the tool is still "select",
         // this would immediately re-select the last object. This is not desired.
         // Selection should primarily be driven by explicit user clicks.
-        // drawingStateRef.current.selectedObjectIndex = storeObjects.length - 1;
-        // redraw();
+        // setSelectedObjectIndex(storeObjects.length - 1);
       }
-    }, [currentTool, storeObjects, redraw, ck]);
+    }, [
+      currentTool,
+      storeObjects,
+      redraw,
+      ck,
+      selectedObjectIndex,
+      setSelectedObjectIndex,
+    ]);
 
     useEffect(() => {
       if (
@@ -806,13 +847,14 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         return;
 
       const oldSurface = drawingStateRef.current.surface;
-      if (oldSurface) oldSurface.delete();
+      if (oldSurface) {
+        oldSurface.delete();
+      }
 
       drawingStateRef.current.canvas = null;
 
       const surface = ck.MakeCanvasSurface(canvasRef.current);
       if (!surface) {
-        console.error("Could not make SkSurface from canvas element");
         return;
       }
       const canvas = surface.getCanvas();
@@ -842,7 +884,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       if (ck && drawingStateRef.current.canvas) {
         redraw();
       }
-    }, [ck, fontMgr, redraw, storeObjects, offset, scale, currentTool]); // Removed hoveredObjectIndex from here
+    }, [ck, scale, offset, redraw]);
 
     const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (
@@ -867,24 +909,13 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         return;
       }
 
-      // This assignment was for drawing new shapes, not directly for selection.
-      // It will be overridden if a new shape drawing starts.
-      // Object.assign(state, {
-      //   startX: worldX,
-      //   startY: worldY,
-      //   currentX: worldX,
-      //   currentY: worldY,
-      // });
-
       if (currentTool === "text") {
         activateTextTool(mouseX, mouseY, worldX, worldY, handleTextSubmit);
         return;
       }
 
-      // Handle selection logic if currentTool is "select" or "none"
       if (currentTool === "select" || currentTool === "none") {
         if (state.activeHandle) {
-          // If a handle is already active (from onPointerDown), let pointer events manage it.
           return;
         }
 
@@ -900,7 +931,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const sY = obj.scaleY || 1;
           let isHit = false;
 
-          // Transform mouse to object's local, unscaled, unrotated space, centered at origin
           let localMouseX = worldX - center.x;
           let localMouseY = worldY - center.y;
 
@@ -930,8 +960,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               isHit = normX * normX + normY * normY <= 1;
             }
           } else if (obj.type === "text" && obj.text && ck && fontMgr) {
-            // For text, use the 'tPt' method which compares unrotated mouse coords (still scaled)
-            // against the text's world-coordinate-based bounding box.
             const tPt =
               rot !== 0
                 ? rotatePoint(worldX, worldY, center.x, center.y, -rot)
@@ -942,9 +970,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               const font = new ck.Font(typeface, fs);
               const glyphIDs = font.getGlyphIDs(obj.text);
               const glyphWidths = font.getGlyphWidths(glyphIDs);
-              // textWidth here is scaled because it's measured with `fs` which is scaled by obj.scaleY (implicitly for text height)
-              // and glyphWidths are based on that scaled font size.
-              // More accurately, font size for width is obj.fontSize, scale for text width is obj.scaleX
               const fontForMeasure = new ck.Font(typeface, obj.fontSize || 20);
               const unscaledGlyphIDs = fontForMeasure.getGlyphIDs(obj.text);
               const unscaledGlyphWidths =
@@ -954,20 +979,15 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                 0
               );
               fontForMeasure.delete();
-              font.delete(); // delete the other font instance
+              font.delete();
 
               const scaledTextWidth = unscaledTextWidth * sX;
               const scaledTextHeight = (obj.fontSize || 20) * sY;
 
-              // obj.startX, obj.startY are the world coordinates of the *unscaled, unrotated* top-left.
-              // The text box for comparison with tPt (unrotated mouse point) should be defined
-              // based on how the text is drawn.
-              // Drawing: canvas.drawText(obj.text, obj.startX, obj.startY + (obj.fontSize || 20) * 0.75, fillPaint, font);
-              // obj.startY is visual top. Baseline is ~0.75*fs down.
               const textRectLeft = obj.startX;
-              const textRectTop = obj.startY; // Visual top
+              const textRectTop = obj.startY;
               const textRectRight = obj.startX + scaledTextWidth;
-              const textRectBottom = obj.startY + scaledTextHeight; // Visual top + scaled height
+              const textRectBottom = obj.startY + scaledTextHeight;
 
               isHit =
                 tPt.x >= textRectLeft &&
@@ -984,31 +1004,43 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         }
 
         if (hitIndex !== -1) {
-          // Clicked on an object
-          if (state.selectedObjectIndex !== hitIndex) {
-            state.selectedObjectIndex = hitIndex;
+          if (selectedObjectIndex !== hitIndex) {
+            setSelectedObjectIndex(hitIndex);
             state.activeHandle = null;
           }
+          state.isObjectDragging = true;
+          const objToDrag = storeObjects[hitIndex];
+          state.dragStartObjectPosition = {
+            startX: objToDrag.startX,
+            startY: objToDrag.startY,
+            endX: objToDrag.endX,
+            endY: objToDrag.endY,
+          };
+          state.dragStartMouse = { x: worldX, y: worldY };
+
+          // Also preserve the current scale values for dragging
+          state.dragStartObject = {
+            ...objToDrag,
+            scaleX: objToDrag.scaleX || 1,
+            scaleY: objToDrag.scaleY || 1,
+          };
+
           if (currentTool === "none") {
             setCurrentTool("select");
           }
           setHoveredObjectIndex(null);
         } else {
-          // Clicked on empty space
-          if (state.selectedObjectIndex !== null) {
-            state.selectedObjectIndex = null;
+          if (selectedObjectIndex !== null) {
+            setSelectedObjectIndex(null);
             state.activeHandle = null;
           }
+          state.isObjectDragging = false;
         }
         redraw();
-        // For select/none tool, a click is for selection, not starting a new drawing.
-        // isDrawing should be false unless a handle is activated (which is handled by onPointerDown).
         setIsDrawing(false);
         return;
       }
 
-      // Fallthrough for starting to draw new shapes if not 'select' or 'none' tool
-      // Assign startX/startY for new shape drawing
       Object.assign(state, {
         startX: worldX,
         startY: worldY,
@@ -1041,10 +1073,41 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           y: offset.y + (mouseY - dragStart.y),
         });
         setDragStart({ x: mouseX, y: mouseY });
+
+        // Force immediate redraw for smoother panning
+        requestAnimationFrame(redraw);
         return;
       }
 
-      // Handle hover detection if not drawing a new shape and no handle is active
+      if (
+        state.isObjectDragging &&
+        selectedObjectIndex !== null &&
+        state.dragStartObjectPosition &&
+        state.dragStartMouse
+      ) {
+        const dx = worldX - state.dragStartMouse.x;
+        const dy = worldY - state.dragStartMouse.y;
+
+        const newStartX = state.dragStartObjectPosition.startX + dx;
+        const newStartY = state.dragStartObjectPosition.startY + dy;
+        const newEndX = state.dragStartObjectPosition.endX + dx;
+        const newEndY = state.dragStartObjectPosition.endY + dy;
+
+        if (selectedObjectIndex !== null) {
+          const currentObject = storeObjects[selectedObjectIndex];
+          updateObject(selectedObjectIndex, {
+            startX: newStartX,
+            startY: newStartY,
+            endX: newEndX,
+            endY: newEndY,
+            scaleX: currentObject.scaleX || 1,
+            scaleY: currentObject.scaleY || 1,
+          });
+        }
+        redraw();
+        return;
+      }
+
       if (
         !isDrawing &&
         !state.activeHandle &&
@@ -1062,7 +1125,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const sY = obj.scaleY || 1;
           let isHit = false;
 
-          // Transform mouse to object's local, unscaled, unrotated space, centered at origin
           let localMouseX = worldX - center.x;
           let localMouseY = worldY - center.y;
 
@@ -1092,15 +1154,14 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               isHit = normX * normX + normY * normY <= 1;
             }
           } else if (obj.type === "text" && obj.text && ck && fontMgr) {
-            // For text, use the 'tPt' method (unrotated mouse coords vs world-like text box)
             const tPt =
               rot !== 0
                 ? rotatePoint(worldX, worldY, center.x, center.y, -rot)
                 : { x: worldX, y: worldY };
-            const fs = obj.fontSize || 20; // This is the base unscaled font size
+            const fs = obj.fontSize || 20;
             const typeface = fontMgr.matchFamilyStyle("Roboto", {});
             if (typeface) {
-              const fontForMeasure = new ck.Font(typeface, fs); // Use base fs for measurement
+              const fontForMeasure = new ck.Font(typeface, fs);
               const unscaledGlyphIDs = fontForMeasure.getGlyphIDs(obj.text);
               const unscaledGlyphWidths =
                 fontForMeasure.getGlyphWidths(unscaledGlyphIDs);
@@ -1111,11 +1172,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               fontForMeasure.delete();
 
               const scaledTextWidth = unscaledTextWidth * sX;
-              const scaledTextHeight = fs * sY; // Base fs scaled by sY
+              const scaledTextHeight = fs * sY;
 
-              // obj.startX, obj.startY are the world coordinates of the *unscaled, unrotated* top-left.
               const textRectLeft = obj.startX;
-              const textRectTop = obj.startY; // Visual top
+              const textRectTop = obj.startY;
               const textRectRight = obj.startX + scaledTextWidth;
               const textRectBottom = obj.startY + scaledTextHeight;
 
@@ -1136,7 +1196,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           setHoveredObjectIndex(foundHoverIdx !== -1 ? foundHoverIdx : null);
         }
       } else if (isDrawing && !state.activeHandle) {
-        // Live drawing preview update
         state.currentX = worldX;
         state.currentY = worldY;
         if (currentTool === "pen" && state.path) {
@@ -1148,98 +1207,144 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
     const handleMouseUp = () => {
       if (showTextInput || textareaRef.current || !ck) return;
-      if (isDragging) {
-        setIsDragging(false);
+
+      const state = drawingStateRef.current;
+
+      // Always reset drag state to prevent getting stuck
+      const wasDragging = isDragging;
+      setIsDragging(false);
+
+      // Also check and clear any active handle state as backup
+      if (state.activeHandle) {
+        state.activeHandle = null;
+        state.dragStartObject = null;
+        state.dragStartPivotWorld = null;
+        state.dragStartHandleWorld = null;
+
+        if (canvasRef.current) {
+          canvasRef.current.style.cursor =
+            currentTool === "select" || currentTool === "none"
+              ? "default"
+              : "crosshair";
+        }
+        redraw();
         return;
       }
-      const state = drawingStateRef.current;
-      if (!isDrawing && currentTool !== "text" && !state.activeHandle) return;
+
       if (currentTool === "text") {
         setIsDrawing(false);
         return;
       }
-      if (currentTool === "select" && !state.activeHandle) {
+
+      if (wasDragging) {
+        redraw();
+        return;
+      }
+
+      if (state.isObjectDragging) {
+        state.isObjectDragging = false;
+        state.dragStartObjectPosition = null;
+        state.dragStartMouse = null;
+        redraw();
+        return;
+      }
+
+      if (isDrawing) {
+        let endX = state.currentX;
+        let endY = state.currentY;
+        let isClickToCreate = false;
+
+        if (
+          currentTool === "rectangle" &&
+          state.startX === state.currentX &&
+          state.startY === state.currentY
+        ) {
+          const defaultSize = 100;
+          endX = state.startX + defaultSize;
+          endY = state.startY + defaultSize;
+          isClickToCreate = true;
+        }
+
+        if (isDrawing || isClickToCreate) {
+          const baseObjectProperties: Omit<
+            SkiaObjectDataForApp,
+            "type" | "endX" | "endY" | "path" | "text" | "id" | "fontSize"
+          > = {
+            startX: state.startX,
+            startY: state.startY,
+            visible: true,
+            fillColor: currentColor,
+            strokeColor: currentStrokeColor,
+            strokeWidth: strokeWidth,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+          };
+          let completeObjectData: SkiaObjectDataForApp | null = null;
+          if (
+            currentTool === "rectangle" ||
+            currentTool === "ellipse" ||
+            currentTool === "line"
+          ) {
+            completeObjectData = {
+              ...baseObjectProperties,
+              type: currentTool,
+              endX,
+              endY,
+            } as SkiaObjectDataForApp;
+          } else if (currentTool === "pen" && state.path) {
+            const pathCopy = state.path.copy();
+            completeObjectData = {
+              ...baseObjectProperties,
+              type: "pen",
+              endX,
+              endY,
+              path: pathCopy,
+            } as SkiaObjectDataForApp;
+            state.path.delete();
+            state.path = null;
+          }
+
+          if (completeObjectData) {
+            if (
+              completeObjectData.type === "line" ||
+              completeObjectData.type === "pen"
+            ) {
+              completeObjectData.fillColor = "transparent";
+            }
+            if (completeObjectData.type === "pen") {
+              completeObjectData.strokeColor = currentStrokeColor;
+            }
+
+            if (onObjectCreated) {
+              const layerId = onObjectCreated(completeObjectData);
+              console.log(
+                `[SkiaCanvas] Created object: ${completeObjectData.type}`
+              );
+            } else {
+              const id = `${Date.now()}-${Math.random()}`;
+              const objWithId = { ...completeObjectData, id };
+              console.log(`[SkiaCanvas] Added object: ${objWithId.type}`);
+              addObject(objWithId as any);
+            }
+            setCurrentTool("select");
+          }
+        }
+
         setIsDrawing(false);
         redraw();
         return;
       }
 
-      let endX = state.currentX,
-        endY = state.currentY;
-      let isClickToCreate = false;
+      setIsDrawing(false);
       if (
-        currentTool === "rectangle" &&
-        state.startX === state.currentX &&
-        state.startY === state.currentY &&
+        canvasRef.current &&
+        (currentTool === "select" || currentTool === "none") &&
         !state.activeHandle
       ) {
-        const defaultSize = 100;
-        endX = state.startX + defaultSize;
-        endY = state.startY + defaultSize;
-        isClickToCreate = true;
+        canvasRef.current.style.cursor = "default";
       }
-
-      const isTransforming = currentTool === "select" && state.activeHandle;
-
-      if ((isDrawing || isClickToCreate) && !isTransforming) {
-        const baseObjectProperties: Omit<
-          SkiaObjectDataForApp,
-          "type" | "endX" | "endY" | "path" | "text" | "id" | "fontSize"
-        > = {
-          startX: state.startX,
-          startY: state.startY,
-          visible: true,
-          fillColor: currentColor,
-          strokeColor: currentColor,
-          strokeWidth: strokeWidth,
-          rotation: 0,
-          scaleX: 1,
-          scaleY: 1,
-        };
-        let completeObjectData: SkiaObjectDataForApp | null = null;
-        if (
-          currentTool === "rectangle" ||
-          currentTool === "ellipse" ||
-          currentTool === "line"
-        ) {
-          completeObjectData = {
-            ...baseObjectProperties,
-            type: currentTool,
-            endX,
-            endY,
-          } as SkiaObjectDataForApp;
-        } else if (currentTool === "pen" && state.path) {
-          const pathCopy = state.path.copy();
-          completeObjectData = {
-            ...baseObjectProperties,
-            type: "pen",
-            endX,
-            endY,
-            path: pathCopy,
-          } as SkiaObjectDataForApp;
-          state.path.delete();
-          state.path = null;
-        }
-        if (completeObjectData?.type === "line")
-          completeObjectData.fillColor = "transparent";
-        if (completeObjectData) {
-          if (onObjectCreated) {
-            onObjectCreated(completeObjectData);
-          } else {
-            const id = `${Date.now()}`;
-            const obj = { ...completeObjectData, id };
-            addObject(obj as any);
-          }
-          setCurrentTool("none");
-        }
-      }
-
-      setIsDrawing(false);
-      if (state.activeHandle && canvasRef.current) {
-        canvasRef.current.style.cursor =
-          currentTool === "select" ? "default" : "crosshair";
-      }
-      state.activeHandle = null;
+      redraw();
     };
 
     const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1251,6 +1356,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       const mouseY = e.clientY - rect.top;
 
       if (e.ctrlKey || e.metaKey) {
+        // Zooming
         const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
         const newScale = Math.max(0.1, Math.min(scale * zoomFactor, 20));
         const newOffsetX = mouseX - (mouseX - offset.x) * (newScale / scale);
@@ -1258,15 +1364,20 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         setScaleAction(newScale);
         setOffsetAction({ x: newOffsetX, y: newOffsetY });
       } else {
+        // Panning (standard wheel behavior):
+        // When you scroll up/down, the content should move up/down
+        // When deltaY is positive (scroll down), content moves up (negative offset change)
+        // When deltaY is negative (scroll up), content moves down (positive offset change)
         setOffsetAction({
-          x: offset.x + e.deltaX,
-          y: offset.y + e.deltaY,
+          x: offset.x - e.deltaX, // When scrolling right, content moves left
+          y: offset.y - e.deltaY, // When scrolling down, content moves up
         });
       }
+      // Force redraw after wheel event
+      requestAnimationFrame(redraw);
     };
 
     const handleTextSubmit = (textValue: string) => {
-      // [TextFlow] submit text
       if (!ck || !textValue.trim() || !clickedPositionRef.current) return;
       const { x: worldX, y: worldY } = clickedPositionRef.current;
       const fontSize = 20;
@@ -1286,12 +1397,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         scaleX: 1,
         scaleY: 1,
       } as SkiaObjectDataForApp;
-      console.log(
-        `[TextFlow] [SkiaCanvas] Submitting text: "${textValue}" at world (${worldX}, ${worldY})`
-      );
       if (onObjectCreated) {
         const layerId = onObjectCreated(textObjectData);
-        console.log(`[TextFlow] [SkiaCanvas] Created layerId: ${layerId}`);
       }
       setCurrentTool("none");
       setShowTextInput(false);
@@ -1334,31 +1441,27 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         if (!ck || currentTool !== "select") return;
         const { x, y } = toCanvasCoords(e);
         const state = drawingStateRef.current;
-        if (state.selectedObjectIndex !== null && state.handles) {
+        if (selectedObjectIndex !== null && state.handles) {
           const activeHandle = hitTestHandles(x, y, state.handles);
           if (activeHandle) {
             e.preventDefault();
             e.stopPropagation();
             state.activeHandle = activeHandle;
+            state.isObjectDragging = false;
             if (canvasRef.current)
               canvasRef.current.style.cursor = activeHandle.cursor;
-            const selectedObject = storeObjects[state.selectedObjectIndex];
+            const selectedObject = storeObjects[selectedObjectIndex];
             const center = getObjectCenter(selectedObject);
             if (activeHandle.action === "rotate") {
               state.initialAngle = calculateAngle(center.x, center.y, x, y);
               state.initialObjectRotation = selectedObject.rotation || 0;
-              // Clear scaling drag state
               state.dragStartObject = null;
               state.dragStartPivotWorld = null;
               state.dragStartHandleWorld = null;
-              console.log(
-                `[SkiaCanvas] Begin rotate on object ${state.selectedObjectIndex}: initialRotation=${state.initialObjectRotation}, initialAngle=${state.initialAngle}`
-              );
             } else if (activeHandle.action === "scale") {
-              // Store initial state for scaling
               state.dragStartObject = JSON.parse(
                 JSON.stringify(selectedObject)
-              ); // Deep copy
+              );
               const oppositeHandlePos = getOppositeHandlePosition(
                 activeHandle.position
               );
@@ -1372,22 +1475,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               );
 
               state.initialObjectScale = {
-                // Store initial scale based on object
                 x: selectedObject.scaleX || 1,
                 y: selectedObject.scaleY || 1,
               };
-              // No need for initialDistance or initialHalfDims from mouse for this method
-              console.log(
-                `[SkiaCanvas] Begin scale on object ${
-                  state.selectedObjectIndex
-                }: handle=${activeHandle.position}, pivot=${JSON.stringify(
-                  state.dragStartPivotWorld
-                )}, handleAt=${JSON.stringify(
-                  state.dragStartHandleWorld
-                )}, initialScale=(${state.initialObjectScale.x}, ${
-                  state.initialObjectScale.y
-                })`
-              );
             }
             return;
           }
@@ -1400,14 +1490,12 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         const coords = toCanvasCoords(e);
         const x = coords.x;
         const y = coords.y;
-        // hover detection
         if (
           currentTool === "select" &&
           state.handles &&
           canvasEl &&
           !state.activeHandle
         ) {
-          // only update cursor if not actively dragging a handle
           const hover = hitTestHandles(x, y, state.handles);
           if (hover) {
             canvasEl.style.cursor =
@@ -1416,11 +1504,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             canvasEl.style.cursor = "default";
           }
         }
-        // handle drag transforms
-        if (!state.activeHandle || state.selectedObjectIndex === null) return;
+        if (!state.activeHandle || selectedObjectIndex === null) return;
         e.preventDefault();
         e.stopPropagation();
-        const selectedIdx = state.selectedObjectIndex;
+        const selectedIdx = selectedObjectIndex;
         const selectedObject = storeObjects[selectedIdx];
         const center = getObjectCenter(selectedObject);
 
@@ -1428,9 +1515,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const currentAngle = calculateAngle(center.x, center.y, x, y);
           const angleDiff = currentAngle - state.initialAngle;
           const newRotation = state.initialObjectRotation + angleDiff;
-          console.log(
-            `[SkiaCanvas] Rotating object ${selectedIdx}: initialRotation=${state.initialObjectRotation}, currentAngle=${currentAngle}, angleDiff=${angleDiff}, newRotation=${newRotation}`
-          );
           rotateObject(selectedIdx, newRotation);
         } else if (state.activeHandle.action === "scale") {
           if (
@@ -1442,14 +1526,11 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
           const originalObj = state.dragStartObject;
           const pivotWorld = state.dragStartPivotWorld;
-          // const originalHandleWorld = state.dragStartHandleWorld; // For reference, if needed
 
-          const originalBounds = getObjectBounds(originalObj); // unscaled
-          const originalCenter = getObjectCenter(originalObj); // unscaled
+          const originalBounds = getObjectBounds(originalObj);
+          const originalCenter = getObjectCenter(originalObj);
           const objectRotation = originalObj.rotation || 0;
 
-          // Transform current cursor (world) and pivot (world) into object's unrotated, unscaled local space
-          // where its center is (0,0)
           const cursorRelativeToOriginalCenter = {
             x: x - originalCenter.x,
             y: y - originalCenter.y,
@@ -1474,7 +1555,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             -objectRotation
           );
 
-          // Normalized handle vector for the currently dragged handle
           const handleNormVec = getNormalizedHandleVector(
             state.activeHandle.position
           );
@@ -1482,9 +1562,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           let newScaleX = originalObj.scaleX || 1;
           let newScaleY = originalObj.scaleY || 1;
 
-          const minDimension = 10; // Minimum scaled dimension in pixels
+          const minDimension = 10;
 
-          // Calculate new scales based on cursor distance from pivot in unrotated object space
           if (handleNormVec.x !== 0) {
             const currentProjectedDistX = unrotatedCursor.x - unrotatedPivot.x;
             const originalProjectedDistX =
@@ -1496,7 +1575,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                 currentProjectedDistX /
                 (originalBounds.width * handleNormVec.x);
             }
-            // Ensure minimum dimension
             if (
               originalBounds.width * newScaleX * scale < minDimension &&
               newScaleX > 0
@@ -1506,7 +1584,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               originalBounds.width * newScaleX * scale > -minDimension &&
               newScaleX < 0
             )
-              newScaleX = -minDimension / scale / originalBounds.width; // for flipped case
+              newScaleX = -minDimension / scale / originalBounds.width;
           }
 
           if (handleNormVec.y !== 0) {
@@ -1520,7 +1598,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                 currentProjectedDistY /
                 (originalBounds.height * handleNormVec.y);
             }
-            // Ensure minimum dimension
             if (
               originalBounds.height * newScaleY * scale < minDimension &&
               newScaleY > 0
@@ -1530,10 +1607,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               originalBounds.height * newScaleY * scale > -minDimension &&
               newScaleY < 0
             )
-              newScaleY = -minDimension / scale / originalBounds.height; // for flipped case
+              newScaleY = -minDimension / scale / originalBounds.height;
           }
 
-          // Prevent flipping beyond a very small scale (e.g. 0.01)
           const minScaleFactor = 0.01;
           newScaleX =
             Math.abs(newScaleX) < minScaleFactor
@@ -1544,13 +1620,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               ? Math.sign(newScaleY) * minScaleFactor
               : newScaleY;
 
-          // Aspect ratio for corner handles
           if (e.shiftKey && isCornerScaleHandle(state.activeHandle.position)) {
             const originalAspectRatio =
               originalBounds.width / originalBounds.height;
             if (handleNormVec.x !== 0 && handleNormVec.y !== 0) {
-              // Corner drag
-              // Determine dominant scale axis or average, for now let's try based on X
               const currentTotalWidth = Math.abs(
                 unrotatedCursor.x - unrotatedPivot.x
               );
@@ -1577,10 +1650,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                   (originalBounds.height * Math.abs(handleNormVec.y))
               );
 
-              // Take the scale factor that results in a larger dimension change
-              // or simply average them, or use the one corresponding to the larger mouse delta
-              // For simplicity, let's use the one that changed more from original or an average
-              // Let's try to maintain original aspect ratio more directly:
               const changeX = Math.abs(newScaleX / (originalObj.scaleX || 1));
               const changeY = Math.abs(newScaleY / (originalObj.scaleY || 1));
 
@@ -1602,17 +1671,13 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               }
             }
           } else if (!isCornerScaleHandle(state.activeHandle.position)) {
-            // Edge handles
-            if (handleNormVec.x === 0) newScaleX = originalObj.scaleX || 1; // Vertical drag, X scale unchanged
-            if (handleNormVec.y === 0) newScaleY = originalObj.scaleY || 1; // Horizontal drag, Y scale unchanged
+            if (handleNormVec.x === 0) newScaleX = originalObj.scaleX || 1;
+            if (handleNormVec.y === 0) newScaleY = originalObj.scaleY || 1;
           }
 
-          // Calculate new unscaled center position to keep pivotWorld fixed
-          // New scaled half dimensions
           const newScaledHalfWidth = (originalBounds.width / 2) * newScaleX;
           const newScaledHalfHeight = (originalBounds.height / 2) * newScaleY;
 
-          // The pivot's position relative to the new center, in the object's unrotated scaled space
           const pivotRelativeToNewCenterUnrotated = {
             x:
               getNormalizedHandleVector(
@@ -1624,7 +1689,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               ).y * newScaledHalfHeight,
           };
 
-          // Rotate this vector to align with world space
           const pivotRelativeToNewCenterRotated = rotatePoint(
             pivotRelativeToNewCenterUnrotated.x,
             pivotRelativeToNewCenterUnrotated.y,
@@ -1633,78 +1697,68 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             objectRotation
           );
 
-          // The new center in world space
           const newWorldCenterX =
             pivotWorld.x - pivotRelativeToNewCenterRotated.x;
           const newWorldCenterY =
             pivotWorld.y - pivotRelativeToNewCenterRotated.y;
 
-          // Calculate new startX, startY, endX, endY based on this new world center and original unscaled dimensions
-          const newStartX = newWorldCenterX - originalBounds.width / 2;
-          const newStartY = newWorldCenterY - originalBounds.height / 2;
-          const newEndX = newWorldCenterX + originalBounds.width / 2;
-          const newEndY = newWorldCenterY + originalBounds.height / 2;
+          // Calculate the new position while preserving original dimensions
+          // We need to update the object's center position based on how the scale affects it
+          const originalObjCenter = getObjectCenter(originalObj);
+          const centerOffsetX = newWorldCenterX - originalObjCenter.x;
+          const centerOffsetY = newWorldCenterY - originalObjCenter.y;
 
-          console.log(
-            `[SkiaCanvas] Scaling object ${selectedIdx}: handle=${state.activeHandle.position}, ` +
-              `origS=(${originalObj.scaleX?.toFixed(
-                2
-              )}, ${originalObj.scaleY?.toFixed(2)}), ` +
-              `newS=(${newScaleX.toFixed(2)}, ${newScaleY.toFixed(2)}), ` +
-              `newCenter=(${newWorldCenterX.toFixed(
-                2
-              )},${newWorldCenterY.toFixed(2)})`
-          );
-
+          // Update only scale and center offset, keep original dimensions
           updateObject(selectedIdx, {
-            startX: newStartX,
-            startY: newStartY,
-            endX: newEndX,
-            endY: newEndY,
+            startX: originalObj.startX + centerOffsetX,
+            startY: originalObj.startY + centerOffsetY,
+            endX: originalObj.endX + centerOffsetX,
+            endY: originalObj.endY + centerOffsetY,
             scaleX: newScaleX,
             scaleY: newScaleY,
           });
-          // No need to call scaleObject separately if updateObject handles scale
+
+          // Force redraw for immediate feedback
+          requestAnimationFrame(redraw);
         }
-        redraw();
       };
 
       const onPointerUp = (e: PointerEvent) => {
         const state = drawingStateRef.current;
         if (state.activeHandle) {
-          e.preventDefault();
-          e.stopPropagation();
+          // Clear all scaling-related state when pointer is released
           state.activeHandle = null;
-          if (canvasRef.current && currentTool === "select")
+          state.dragStartObject = null;
+          state.dragStartPivotWorld = null;
+          state.dragStartHandleWorld = null;
+
+          if (canvasRef.current) {
             canvasRef.current.style.cursor = "default";
+          }
+
           redraw();
         }
       };
 
-      canvasEl.addEventListener("pointerdown", onPointerDown, {
-        capture: true,
-        passive: false,
-      });
-      window.addEventListener("pointermove", onPointerMove, { passive: false });
-      window.addEventListener("pointerup", onPointerUp, { passive: false });
+      canvasEl.addEventListener("pointerdown", onPointerDown);
+      canvasEl.addEventListener("pointermove", onPointerMove);
+      canvasEl.addEventListener("pointerup", onPointerUp);
+
       return () => {
-        canvasEl.removeEventListener("pointerdown", onPointerDown, {
-          capture: true,
-        });
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
+        canvasEl.removeEventListener("pointerdown", onPointerDown);
+        canvasEl.removeEventListener("pointermove", onPointerMove);
+        canvasEl.removeEventListener("pointerup", onPointerUp);
       };
     }, [
       ck,
+      currentTool,
       storeObjects,
+      updateObject,
       scale,
       offset,
+      selectedObjectIndex,
+      setSelectedObjectIndex,
       rotateObject,
-      scaleObject,
-      redraw,
-      currentTool,
-      hitTestHandles,
-      updateObject,
       scaleObject,
     ]);
 
@@ -1729,7 +1783,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         case HandlePosition.BottomRight:
           return { x: 1, y: 1 };
         default:
-          return { x: 0, y: 0 }; // Should not happen for scale handles
+          return { x: 0, y: 0 };
       }
     };
 
@@ -1754,7 +1808,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         case HandlePosition.BottomRight:
           return HandlePosition.TopLeft;
         default:
-          return position; // Should not happen
+          return position;
       }
     };
 
@@ -1774,19 +1828,13 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       objectScaleX: number = object.scaleX || 1,
       objectScaleY: number = object.scaleY || 1
     ): { x: number; y: number } => {
-      const bounds = getObjectBounds(object); // unscaled bounds
-      const objectCenter = getObjectCenter(object); // unscaled center
-
+      const bounds = getObjectBounds(object);
+      const objectCenter = getObjectCenter(object);
       const halfWidth = (bounds.width / 2) * objectScaleX;
       const halfHeight = (bounds.height / 2) * objectScaleY;
-
-      let localX = 0,
-        localY = 0;
       const normVec = getNormalizedHandleVector(handlePosition);
-      localX = normVec.x * halfWidth;
-      localY = normVec.y * halfHeight;
-
-      // Rotate this local point around (0,0) as it's already relative to scaled center
+      const localX = normVec.x * halfWidth;
+      const localY = normVec.y * halfHeight;
       const rotatedHandlePoint = rotatePoint(
         localX,
         localY,
@@ -1794,8 +1842,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         0,
         objectRotation
       );
-
-      // Translate to object's actual center in world space
       return {
         x: objectCenter.x + rotatedHandlePoint.x,
         y: objectCenter.y + rotatedHandlePoint.y,
@@ -1805,13 +1851,12 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
     const handleCanvasMouseLeave = useCallback(() => {
       const state = drawingStateRef.current;
       if (currentTool === "select") {
-        // Simplified condition, always deselect/dehover on leave if select tool
-        state.selectedObjectIndex = null;
+        // Only clear hover and active handle states, but keep the selection
         state.activeHandle = null;
         if (canvasRef.current) {
           canvasRef.current.style.cursor = "default";
         }
-        setHoveredObjectIndex(null); // Clear hover as well
+        setHoveredObjectIndex(null);
         redraw();
       }
     }, [currentTool, redraw]);

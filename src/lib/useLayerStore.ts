@@ -110,54 +110,27 @@ export const useLayerStore = create<LayerState>((set) => ({
 
   selectLayer: (id) => {
     set((state) => {
+      // If no valid id provided, deselect all
+      if (!id) {
+        return {
+          layers: state.layers.map((l) => ({ ...l, selected: false })),
+          selectedLayerId: null,
+        };
+      }
+
       // Find the layer
       const layer = state.layers.find((l) => l.id === id);
 
       // If no layer found, don't change anything
       if (!layer) return state;
 
-      // Update properties based on layer type
-      let newPosition = { ...state.position };
-      let newDimensions = { ...state.dimensions };
-      let newAppearance = { ...state.appearance };
-
-      // In a real implementation, we would get the actual properties of this
-      // specific layer from a more comprehensive data structure
-      if (layer.type === "rectangle") {
-        newDimensions = { width: 200, height: 100 };
-        newPosition = { x: 150, y: 200, rotation: 0 };
-        newAppearance = {
-          fill: "#FFFFFF",
-          stroke: "transparent",
-          strokeWidth: 2,
-        };
-      } else if (layer.type === "ellipse") {
-        newDimensions = { width: 247, height: 233 };
-        newPosition = { x: 308, y: 509, rotation: 0 };
-        newAppearance = {
-          fill: "#FFFFFF",
-          stroke: "transparent",
-          strokeWidth: 2,
-        };
-      } else if (layer.type === "text") {
-        newDimensions = { width: 120, height: 30 };
-        newPosition = { x: 250, y: 300, rotation: 0 };
-        newAppearance = {
-          fill: "#FFFFFF",
-          stroke: "transparent",
-          strokeWidth: 0,
-        };
-      }
-
+      // Update selection without changing properties (they'll be set externally)
       return {
         layers: state.layers.map((l) => ({
           ...l,
           selected: l.id === id,
         })),
         selectedLayerId: id,
-        position: newPosition,
-        dimensions: newDimensions,
-        appearance: newAppearance,
       };
     });
   },

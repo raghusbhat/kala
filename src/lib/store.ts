@@ -1,12 +1,24 @@
 import { create } from "zustand";
-import type { DrawingTool } from "../components/SkiaCanvas/SkiaCanvas";
+import type { Path } from "canvaskit-wasm";
 import { typedSetter } from "./utils";
+import type { SkiaObjectDataForApp } from "../components/CanvasArea";
+
+export type DrawingTool =
+  | "none"
+  | "select"
+  | "rectangle"
+  | "ellipse"
+  | "line"
+  | "pen"
+  | "text";
 
 // Define object types
 export interface BaseObject {
   type: DrawingTool;
   startX: number;
   startY: number;
+  endX: number;
+  endY: number;
   fillColor: string;
   strokeColor: string;
   strokeWidth?: number;
@@ -15,13 +27,13 @@ export interface BaseObject {
   scaleX?: number;
   scaleY?: number;
   id?: string;
+  path?: Path;
+  text?: string;
+  fontSize?: number;
 }
 
 export interface ShapeObject extends BaseObject {
   type: "rectangle" | "ellipse" | "line" | "pen" | "select";
-  endX: number;
-  endY: number;
-  path?: any;
 }
 
 export interface TextObject extends BaseObject {
@@ -29,8 +41,6 @@ export interface TextObject extends BaseObject {
   id: string;
   text: string;
   fontSize: number;
-  endX: number;
-  endY: number;
 }
 
 export type CanvasObject = ShapeObject | TextObject;
@@ -81,7 +91,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   scale: 1,
   offset: { x: 0, y: 0 },
   setScale: (scale) => set({ scale }),
-  setOffset: (offset) => set({ offset: typedSetter(offset) }),
+  setOffset: (offset) => set({ offset }),
 
   // Text tool
   textPosition: { x: 0, y: 0 },
@@ -159,3 +169,11 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       return { objects: newObjects };
     }),
 }));
+
+// Utility function to get the path data for a pen object
+export const getPenObjectPath = (object: CanvasObject): Path | undefined => {
+  if (object.type === "pen" && object.path) {
+    return object.path as Path;
+  }
+  return undefined;
+};
