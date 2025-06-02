@@ -1,111 +1,104 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useCanvasStore } from "./store";
 
-export function useTextTool() {
-  const { currentTool, setTextPosition } = useCanvasStore();
-  const [showTextInput, setShowTextInput] = useState(false);
+export const useTextTool = () => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const textToolActiveRef = useRef<boolean>(false);
-  const clickedPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const textSubmittedRef = useRef<boolean>(false);
+  const clickedPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const [showTextInput, setShowTextInput] = useState(false);
+  const { setTextPosition } = useCanvasStore();
 
-  // Clean up existing textarea
+  // Cleanup function
   const cleanupTextarea = () => {
-    if (textareaRef.current) {
-      try {
-        if (document.body.contains(textareaRef.current)) {
-          document.body.removeChild(textareaRef.current);
-        }
-      } catch {}
-      textareaRef.current = null;
-      setShowTextInput(false);
+    if (textareaRef.current && document.body.contains(textareaRef.current)) {
+      document.body.removeChild(textareaRef.current);
     }
+    textareaRef.current = null;
+    setShowTextInput(false);
   };
-
-  // Submit text and cleanup
-  const safeSubmitText = (
-    text: string,
-    handleTextSubmit: (text: string) => void
-  ) => {
-    if (textSubmittedRef.current || !textareaRef.current) return;
-    textSubmittedRef.current = true;
-    cleanupTextarea();
-    if (!text.trim()) return;
-    console.log(`[TextFlow] [TextTool] Submitted text: "${text}" at world { x:${clickedPositionRef.current.x}, y:${clickedPositionRef.current.y} }`);
-    handleTextSubmit(text);
-  };
-
-  // Create and position textarea
-  const createTextArea = (
-    x: number,
-    y: number,
-    handleTextSubmit: (text: string) => void
-  ) => {
-    cleanupTextarea();
-    textSubmittedRef.current = false;
-    console.log(`[TextFlow] [TextTool] Create textarea at screen { x:${x}, y:${y} } world { x:${clickedPositionRef.current.x}, y:${clickedPositionRef.current.y} }`);
-    const textarea = document.createElement("textarea");
-    Object.assign(textarea.style, {
-      position: "absolute",
-      left: `${x}px`,
-      top: `${y}px`,
-      width: "200px",
-      minHeight: "40px",
-      padding: "8px",
-      border: "2px solid #7c3aed",
-      borderRadius: "4px",
-      backgroundColor: "rgba(0, 0, 0, 0.8)",
-      color: "#ffffff",
-      fontFamily: "sans-serif",
-      fontSize: "16px",
-      zIndex: "1000",
-      resize: "both",
-      overflow: "hidden",
-      outline: "none",
-      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
-    });
-    textarea.placeholder = "Type text here...";
-    textarea.dataset.skiaTextarea = "true";
-    textarea.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        safeSubmitText(textarea.value, handleTextSubmit);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        cleanupTextarea();
-      }
-    });
-    textarea.addEventListener("blur", () => {
-      safeSubmitText(textarea.value, handleTextSubmit);
-    });
-    document.body.appendChild(textarea);
-    textareaRef.current = textarea;
-    setTimeout(() => textarea.focus(), 10);
-    setShowTextInput(true);
-  };
-
-  // Track tool change
-  useEffect(() => {
-    textToolActiveRef.current = currentTool === "text";
-    if (currentTool !== "text" && textareaRef.current) {
-      cleanupTextarea();
-    }
-  }, [currentTool]);
 
   // Cleanup on unmount
   useEffect(() => () => cleanupTextarea(), []);
 
-  const activateTextTool = (
-    mouseX: number,
-    mouseY: number,
-    worldX: number,
-    worldY: number,
-    handleTextSubmit: (text: string) => void
-  ) => {
-    clickedPositionRef.current = { x: worldX, y: worldY };
-    setTextPosition({ x: worldX, y: worldY });
-    createTextArea(mouseX, mouseY, handleTextSubmit);
-  };
+  const activateTextTool = useCallback(
+    (
+      screenX: number,
+      screenY: number,
+      worldX: number,
+      worldY: number,
+      onSubmit: (text: string) => void
+    ) => {
+      if (textareaRef.current) return;
 
-  return { textareaRef, textToolActiveRef, clickedPositionRef, showTextInput, activateTextTool, setShowTextInput };
-}
+      clickedPositionRef.current = { x: worldX, y: worldY };
+      setTextPosition({ x: worldX, y: worldY });
+
+      const textarea = document.createElement("textarea");
+      textarea.style.position = "absolute";
+      textarea.style.left = `${screenX}px`;
+      textarea.style.top = `${screenY}px`;
+      textarea.style.fontSize = "16px";
+      textarea.style.border = "2px solid #007acc";
+      textarea.style.borderRadius = "4px";
+      textarea.style.padding = "4px";
+      textarea.style.backgroundColor = "white";
+      textarea.style.color = "black";
+      textarea.style.outline = "none";
+      textarea.style.resize = "none";
+      textarea.style.fontFamily = "Arial, sans-serif";
+      textarea.style.minWidth = "100px";
+      textarea.style.minHeight = "24px";
+      textarea.style.zIndex = "10000";
+
+      textareaRef.current = textarea;
+      setShowTextInput(true);
+
+      // Handle submit on Enter or blur
+      const submitText = (text: string) => {
+        if (!text.trim() || !clickedPositionRef.current) return;
+
+        onSubmit(text);
+        setShowTextInput(false);
+
+        if (
+          textareaRef.current &&
+          document.body.contains(textareaRef.current)
+        ) {
+          document.body.removeChild(textareaRef.current);
+        }
+        textareaRef.current = null;
+      };
+
+      textarea.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          submitText(textarea.value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setShowTextInput(false);
+          if (document.body.contains(textarea)) {
+            document.body.removeChild(textarea);
+          }
+          textareaRef.current = null;
+        }
+      });
+
+      textarea.addEventListener("blur", () => {
+        submitText(textarea.value);
+      });
+
+      document.body.appendChild(textarea);
+      setTimeout(() => textarea.focus(), 0);
+    },
+    [setShowTextInput, setTextPosition]
+  );
+
+  return {
+    textareaRef,
+    textToolActiveRef,
+    clickedPositionRef,
+    showTextInput,
+    setShowTextInput,
+    activateTextTool,
+  };
+};

@@ -36,6 +36,7 @@ function App() {
   // Canvas store hooks
   const {
     objects: canvasObjects,
+    currentTool,
     updateObject: updateCanvasObject,
     addObject: addCanvasObject,
     removeObject: removeCanvasObject,
@@ -54,11 +55,6 @@ function App() {
     );
 
     if (canvasObjectIndex !== -1) {
-      const deletedObject = canvasObjects[canvasObjectIndex];
-      console.log(
-        `🗑️ Deleted object: ${deletedObject.type} (ID: ${deletedObject.id})`
-      );
-
       // Remove from both stores
       removeCanvasObject(canvasObjectIndex);
       deleteLayer(selectedLayerId);
@@ -68,22 +64,47 @@ function App() {
   // Add keyboard shortcut for delete
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Only handle delete when there's a selected object and not in text input
+      // Skip if typing in input fields or text tool is active
       if (
-        ((event.key === "Delete" || event.key === "Backspace") &&
-          selectedLayerId &&
-          !event.target) ||
-        (event.target &&
-          !(event.target as HTMLElement).tagName.match(/INPUT|TEXTAREA/))
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        currentTool === "text" ||
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement ||
+        (document.activeElement instanceof HTMLElement &&
+          document.activeElement.contentEditable === "true")
       ) {
-        event.preventDefault();
-        handleDeleteObject();
+        return;
+      }
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (selectedLayer) {
+          // Use the same logic as handleDeleteObject to remove from both stores
+          const canvasObjectIndex = canvasObjects.findIndex(
+            (obj) => obj.id === selectedLayer.id
+          );
+
+          if (canvasObjectIndex !== -1) {
+            // Remove from both stores
+            removeCanvasObject(canvasObjectIndex);
+            deleteLayer(selectedLayer.id);
+          }
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleDeleteObject, selectedLayerId]);
+  }, [
+    currentTool,
+    selectedLayer,
+    deleteLayer,
+    selectLayer,
+    canvasObjects,
+    removeCanvasObject,
+  ]);
 
   // Function to handle object creation initiated from SkiaCanvas
   const handleSkiaObjectCreated = useCallback(

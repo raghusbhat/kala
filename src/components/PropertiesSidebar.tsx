@@ -8,7 +8,7 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
-import { FiChevronDown, FiTrash2 } from "react-icons/fi";
+import { FiChevronDown, FiTrash2, FiLink, FiUnlock } from "react-icons/fi";
 import PropertySection from "./ui-custom/PropertySection";
 import PropertyInput from "./ui-custom/PropertyInput";
 import ColorInput from "./ui-custom/ColorInput";
@@ -61,7 +61,35 @@ export default function PropertiesSidebar({
   onToggleLayerLock,
   onDeleteObject,
 }: PropertiesSidebarProps) {
-  const { canvasBackgroundColor, setCanvasBackgroundColor } = useCanvasStore();
+  const {
+    canvasBackgroundColor,
+    setCanvasBackgroundColor,
+    aspectRatioLocked,
+    setAspectRatioLocked,
+  } = useCanvasStore();
+
+  // Calculate current aspect ratio
+  const currentAspectRatio = dimensions.width / dimensions.height;
+
+  // Handle width change with aspect ratio lock
+  const handleWidthChange = (value: string) => {
+    onDimensionsChange("width", value);
+    if (aspectRatioLocked && !isNaN(currentAspectRatio)) {
+      const newWidth = parseFloat(value);
+      const newHeight = newWidth / currentAspectRatio;
+      onDimensionsChange("height", newHeight.toFixed(2));
+    }
+  };
+
+  // Handle height change with aspect ratio lock
+  const handleHeightChange = (value: string) => {
+    onDimensionsChange("height", value);
+    if (aspectRatioLocked && !isNaN(currentAspectRatio)) {
+      const newHeight = parseFloat(value);
+      const newWidth = newHeight * currentAspectRatio;
+      onDimensionsChange("width", newWidth.toFixed(2));
+    }
+  };
 
   return (
     <aside className="w-72 border-l border-border bg-card flex flex-col">
@@ -123,19 +151,52 @@ export default function PropertiesSidebar({
 
               {/* Layout section */}
               <PropertySection title="Layout">
-                <div className="grid grid-cols-2 gap-2">
-                  <PropertyInput
-                    label="W"
-                    value={dimensions.width}
-                    onChange={(value) => onDimensionsChange("width", value)}
-                    type="number"
-                  />
-                  <PropertyInput
-                    label="H"
-                    value={dimensions.height}
-                    onChange={(value) => onDimensionsChange("height", value)}
-                    type="number"
-                  />
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <PropertyInput
+                        label="W"
+                        value={dimensions.width}
+                        onChange={handleWidthChange}
+                        type="number"
+                      />
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setAspectRatioLocked(!aspectRatioLocked)
+                          }
+                          className={`h-7 w-7 p-0 ${
+                            aspectRatioLocked
+                              ? "text-primary"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {aspectRatioLocked ? (
+                            <FiLink className="h-3 w-3" />
+                          ) : (
+                            <FiUnlock className="h-3 w-3" />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>
+                          {aspectRatioLocked ? "Unlock" : "Lock"} aspect ratio
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <div className="flex-1">
+                      <PropertyInput
+                        label="H"
+                        value={dimensions.height}
+                        onChange={handleHeightChange}
+                        type="number"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Corner Radius Controls */}

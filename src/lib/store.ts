@@ -78,6 +78,10 @@ interface CanvasState {
   textPosition: { x: number; y: number };
   setTextPosition: (position: { x: number; y: number }) => void;
 
+  // Aspect ratio lock
+  aspectRatioLocked: boolean;
+  setAspectRatioLocked: (locked: boolean) => void;
+
   // Objects
   objects: CanvasObject[];
   addObject: (object: CanvasObject) => void;
@@ -117,6 +121,10 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   // Text tool
   textPosition: { x: 0, y: 0 },
   setTextPosition: (position) => set({ textPosition: typedSetter(position) }),
+
+  // Aspect ratio lock
+  aspectRatioLocked: false,
+  setAspectRatioLocked: (locked) => set({ aspectRatioLocked: locked }),
 
   // Objects
   objects: [],

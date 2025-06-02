@@ -3,30 +3,45 @@ import type { CanvasKit as CanvasKitType } from "canvaskit-wasm";
 // It's good practice to define types for complex parameters if they are reused
 // For now, keeping them as basic types or 'any' if they are directly passed to CanvasKit
 
-export const hexToRgba = (hex: string, defaultAlpha = 1) => {
+export function hexToRgba(hex: string): {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+} {
+  // Handle transparent color
   if (hex === "transparent") {
     return { r: 0, g: 0, b: 0, a: 0 };
   }
 
-  const sanitizedHex = hex.replace("#", "");
-  let r, g, b, a;
+  // Handle rgba() format
+  if (hex.startsWith("rgba(")) {
+    const match = hex.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
+    if (match) {
+      return {
+        r: parseInt(match[1]) / 255,
+        g: parseInt(match[2]) / 255,
+        b: parseInt(match[3]) / 255,
+        a: parseFloat(match[4]),
+      };
+    }
+  }
 
-  if (sanitizedHex.length === 8) {
-    r = parseInt(sanitizedHex.substring(0, 2), 16) / 255;
-    g = parseInt(sanitizedHex.substring(2, 4), 16) / 255;
-    b = parseInt(sanitizedHex.substring(4, 6), 16) / 255;
-    a = parseInt(sanitizedHex.substring(6, 8), 16) / 255;
-  } else if (sanitizedHex.length === 6) {
-    r = parseInt(sanitizedHex.substring(0, 2), 16) / 255;
-    g = parseInt(sanitizedHex.substring(2, 4), 16) / 255;
-    b = parseInt(sanitizedHex.substring(4, 6), 16) / 255;
-    a = defaultAlpha;
-  } else {
-    console.warn(`Invalid hex color: ${hex}, returning transparent black`);
+  // Remove # if present
+  hex = hex.replace("#", "");
+
+  // Validate hex format
+  if (!/^[0-9A-Fa-f]{6}$/.test(hex)) {
     return { r: 0, g: 0, b: 0, a: 0 };
   }
-  return { r, g, b, a };
-};
+
+  // Convert hex to RGB
+  const r = parseInt(hex.substring(0, 2), 16) / 255;
+  const g = parseInt(hex.substring(2, 4), 16) / 255;
+  const b = parseInt(hex.substring(4, 6), 16) / 255;
+
+  return { r, g, b, a: 1.0 };
+}
 
 export const getObjectCenter = (obj: {
   startX: number;

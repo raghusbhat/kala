@@ -55,10 +55,37 @@ enum HandlePosition {
   Right = 6,
   Bottom = 7,
   Rotation = 8,
+  // New rotation areas near corners (Figma-style)
+  RotationTopLeft = 9,
+  RotationTopRight = 10,
+  RotationBottomLeft = 11,
+  RotationBottomRight = 12,
 }
 
-const ROTATE_CURSOR =
-  'url("data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path d="M12,2 A10,10 0 0,1 22,12" stroke="%231299E6" stroke-width=2 fill="none"/><polyline points="22,12 20,10 20,14" stroke="%231299E6" stroke-width=2 fill="none"/></svg>") 8 8, auto';
+// Create corner-specific dotted curve rotation cursors with exact Figma angles
+// Using white stroke with black outline for visibility on both light and dark backgrounds
+// Made bigger (32x32) and more dashed for better visibility
+// Each curve is centered around the hotspot (16,16) and shows rotation around that corner
+// All cursors use consistent quarter-circle style with larger bend angles
+
+// Top-Left corner: quarter-circle curve extending from top-left corner
+const ROTATE_CURSOR_TL =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M8,16 Q8,8 16,8'/><path class='curve-inner' d='M8,16 Q8,8 16,8'/><polygon class='arrow' points='8,16 5,13 8,14 11,17'/><polygon class='arrow' points='16,8 13,5 14,8 17,11'/></svg>\") 16 16, auto";
+
+// Top-Right corner: quarter-circle curve extending from top-right corner
+const ROTATE_CURSOR_TR =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M16,8 Q24,8 24,16'/><path class='curve-inner' d='M16,8 Q24,8 24,16'/><polygon class='arrow' points='16,8 19,5 16,6 13,9'/><polygon class='arrow' points='24,16 27,13 24,14 21,17'/></svg>\") 16 16, auto";
+
+// Bottom-Left corner: quarter-circle curve extending from bottom-left corner (now consistent with others)
+const ROTATE_CURSOR_BL =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M16,24 Q8,24 8,16'/><path class='curve-inner' d='M16,24 Q8,24 8,16'/><polygon class='arrow' points='16,24 19,27 16,26 13,23'/><polygon class='arrow' points='8,16 5,19 8,18 11,15'/></svg>\") 16 16, auto";
+
+// Bottom-Right corner: quarter-circle curve extending from bottom-right corner
+const ROTATE_CURSOR_BR =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M24,16 Q24,24 16,24'/><path class='curve-inner' d='M24,16 Q24,24 16,24'/><polygon class='arrow' points='24,16 27,19 24,18 21,15'/><polygon class='arrow' points='16,24 13,27 16,26 19,23'/></svg>\") 16 16, auto";
+
+// Use the top-left cursor as the default rotation cursor
+const ROTATE_CURSOR = ROTATE_CURSOR_TL;
 
 // Cursor styles for different handle positions
 const CURSOR_STYLES: Record<HandlePosition, string> = {
@@ -71,6 +98,10 @@ const CURSOR_STYLES: Record<HandlePosition, string> = {
   [HandlePosition.Right]: "ew-resize",
   [HandlePosition.Bottom]: "ns-resize",
   [HandlePosition.Rotation]: ROTATE_CURSOR,
+  [HandlePosition.RotationTopLeft]: ROTATE_CURSOR_TL,
+  [HandlePosition.RotationTopRight]: ROTATE_CURSOR_TR,
+  [HandlePosition.RotationBottomLeft]: ROTATE_CURSOR_BL,
+  [HandlePosition.RotationBottomRight]: ROTATE_CURSOR_BR,
 };
 
 interface Handle {
@@ -152,6 +183,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       currentStrokeColor,
       strokeWidth,
       canvasBackgroundColor,
+      aspectRatioLocked,
       // Actions
       setCurrentTool,
       addObject,
@@ -166,6 +198,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
     const [selectedObjectIndex, setSelectedObjectIndex] = useState<
       number | null
     >(null);
+
+    // Add space bar tracking state
+    const [isSpacePressed, setIsSpacePressed] = useState(false);
 
     // Notify parent component when selection changes
     useEffect(() => {
@@ -218,6 +253,34 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       null
     );
 
+    // Helper function to set cursor consistently
+    const setCursor = useCallback(
+      (overrideCursor?: string) => {
+        if (!canvasRef.current) return;
+
+        if (overrideCursor) {
+          canvasRef.current.style.cursor = overrideCursor;
+          return;
+        }
+
+        if (isDragging) {
+          canvasRef.current.style.cursor = "grabbing";
+        } else if (isSpacePressed) {
+          canvasRef.current.style.cursor = "grab";
+        } else if (drawingStateRef.current.activeHandle) {
+          canvasRef.current.style.cursor =
+            drawingStateRef.current.activeHandle.cursor;
+        } else if (currentTool === "select" || currentTool === "none") {
+          canvasRef.current.style.cursor = "default";
+        } else if (currentTool === "text") {
+          canvasRef.current.style.cursor = "text";
+        } else {
+          canvasRef.current.style.cursor = "crosshair";
+        }
+      },
+      [isDragging, isSpacePressed, currentTool]
+    );
+
     const drawSelectionHandlesInternal = useCallback(
       (canvas: Canvas, localCk: CanvasKitType, obj: SkiaObjectDataForApp) => {
         if (!obj || obj.type === "select" || !localCk) return [];
@@ -230,7 +293,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         const height = bounds.height * scaleY;
         const handleSize = 8; // Size of the handle in pixels
         // const handleHitRadius = 6; // Hit detection radius (not currently used)
-        const rotateHandleOffset = 36;
+        // const rotateHandleOffset = 36; // Removed since we use Figma-style corner rotation
 
         const blue = localCk.Color(0, 153, 255, 1.0);
         const white = localCk.Color(255, 255, 255, 1.0);
@@ -318,6 +381,51 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           },
         ];
 
+        // Add Figma-style rotation areas near corners (invisible handles)
+        // Position them extending diagonally outward from each corner, matching Figma's behavior
+        const rotationDistance = 24; // Distance from corner where rotation cursor appears
+        const rotationHandles: Handle[] = [
+          {
+            position: HandlePosition.RotationTopLeft,
+            x: -width / 2 - rotationDistance, // Extend northwest from top-left corner
+            y: -height / 2 - rotationDistance,
+            cursor: ROTATE_CURSOR_TL,
+            action: "rotate" as const,
+          },
+          {
+            position: HandlePosition.RotationTopRight,
+            x: width / 2 + rotationDistance, // Extend northeast from top-right corner
+            y: -height / 2 - rotationDistance,
+            cursor: ROTATE_CURSOR_TR,
+            action: "rotate" as const,
+          },
+          {
+            position: HandlePosition.RotationBottomLeft,
+            x: -width / 2 - rotationDistance, // Extend southwest from bottom-left corner
+            y: height / 2 + rotationDistance,
+            cursor: ROTATE_CURSOR_BL,
+            action: "rotate" as const,
+          },
+          {
+            position: HandlePosition.RotationBottomRight,
+            x: width / 2 + rotationDistance, // Extend southeast from bottom-right corner
+            y: height / 2 + rotationDistance,
+            cursor: ROTATE_CURSOR_BR,
+            action: "rotate" as const,
+          },
+        ];
+
+        console.log(
+          "Created rotation handles:",
+          rotationHandles.map((h) => ({
+            position: h.position,
+            cursor: h.cursor.substring(0, 50) + "...",
+          }))
+        );
+
+        // Add rotation handles to the main handles array
+        handles.push(...rotationHandles);
+
         // Make corner handles slightly larger
         const cornerHandleSize = handleSize * 1.5;
 
@@ -325,6 +433,13 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         handles.forEach((handle) => {
           const isCorner = handle.position <= HandlePosition.BottomRight;
           const size = isCorner ? cornerHandleSize : handleSize;
+
+          console.log(
+            "Processing handle:",
+            handle.position,
+            "cursor before update:",
+            handle.cursor
+          );
 
           // Draw the handle (only draw corner handles, edge handles are invisible but hittable)
           if (isCorner) {
@@ -345,53 +460,19 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           handle.x = center.x + rotatedPoint.x;
           handle.y = center.y + rotatedPoint.y;
 
-          // Update cursor based on handle position
-          handle.cursor = CURSOR_STYLES[handle.position];
-        });
+          // Update cursor based on handle position - but don't override rotation handle cursors
+          if (handle.action !== "rotate") {
+            handle.cursor = CURSOR_STYLES[handle.position];
+          }
 
-        // Draw rotation handle line
-        const linePaint = new localCk.Paint();
-        linePaint.setAntiAlias(true);
-        linePaint.setColor(blue);
-        linePaint.setStyle(localCk.PaintStyle.Stroke);
-        linePaint.setStrokeWidth(1.5);
-        canvas.drawLine(
-          0,
-          -height / 2,
-          0,
-          -height / 2 - rotateHandleOffset,
-          linePaint
-        );
-        linePaint.delete();
-
-        // Draw rotation handle
-        const rotHandleBaseX = 0;
-        const rotHandleBaseY = -height / 2 - rotateHandleOffset;
-        drawFigmaHandle(
-          canvas as any,
-          localCk,
-          rotHandleBaseX,
-          rotHandleBaseY,
-          handleSize / 2,
-          blue,
-          white,
-          shadow
-        );
-
-        // Add rotation handle to the handles array
-        const rotatedRotHandlePoint = rotatePoint(
-          rotHandleBaseX,
-          rotHandleBaseY,
-          0,
-          0,
-          rotation
-        );
-        handles.push({
-          position: HandlePosition.Rotation,
-          x: center.x + rotatedRotHandlePoint.x,
-          y: center.y + rotatedRotHandlePoint.y,
-          cursor: ROTATE_CURSOR,
-          action: "rotate",
+          console.log(
+            "Handle after processing:",
+            handle.position,
+            "cursor:",
+            handle.cursor,
+            "action:",
+            handle.action
+          );
         });
 
         canvas.restore();
@@ -405,12 +486,62 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       y: number,
       handles: Handle[] | undefined
     ) => {
-      if (!handles) return null;
-      const threshold = 14;
-      for (const handle of handles) {
-        if (calculateDistance(x, y, handle.x, handle.y) <= threshold)
-          return handle;
+      if (!handles) {
+        console.log("No handles to test");
+        return null;
       }
+
+      console.log("Testing handles at position:", { x, y });
+      console.log(
+        "Available handles:",
+        handles.map((h) => ({
+          position: h.position,
+          action: h.action,
+          cursor: h.cursor,
+        }))
+      );
+
+      // First pass: Check for rotation handles (they have priority)
+      for (const handle of handles) {
+        if (
+          handle.action === "rotate" &&
+          handle.position >= HandlePosition.RotationTopLeft
+        ) {
+          const threshold = 28; // Larger threshold for rotation handles to match Figma's generous hit area
+          const distance = calculateDistance(x, y, handle.x, handle.y);
+          console.log(
+            `Rotation handle ${handle.position} distance: ${distance}, threshold: ${threshold}`
+          );
+          if (distance <= threshold) {
+            console.log(
+              "HIT ROTATION HANDLE:",
+              handle.position,
+              "cursor:",
+              handle.cursor
+            );
+            return handle;
+          }
+        }
+      }
+
+      // Second pass: Check for scale handles only if no rotation handle was found
+      for (const handle of handles) {
+        if (handle.action === "scale") {
+          const threshold = 14;
+          const distance = calculateDistance(x, y, handle.x, handle.y);
+          if (distance <= threshold) {
+            console.log(
+              "HIT SCALE HANDLE:",
+              handle.position,
+              "cursor:",
+              handle.cursor
+            );
+            return handle;
+          }
+        }
+      }
+
+      console.log("No handle hit");
       return null;
     };
 
@@ -545,7 +676,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                 font.delete();
               }
             } catch (e) {
-              console.warn("Failed to render shadow for text:", e);
+              // Failed to render shadow for text - continue without shadow
             }
           } else if (obj.type === "pen" && obj.path) {
             // For pen, draw shadow path with offset and spread
@@ -727,7 +858,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             );
             font.delete();
           } catch (e) {
-            console.warn("Failed to load font:", e);
+            // Failed to load font - continue without text rendering
           }
         }
 
@@ -837,6 +968,76 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       }
       drawingStateRef.current.handles = activeSelectionHandles;
 
+      // 4. Draw Aspect Ratio Lock Indicator (when locked and actively scaling)
+      if (
+        aspectRatioLocked &&
+        selectedObjectIndex !== null &&
+        drawingStateRef.current.activeHandle &&
+        drawingStateRef.current.activeHandle.action === "scale"
+      ) {
+        const selectedObj = storeObjects[selectedObjectIndex];
+        if (selectedObj) {
+          const center = getObjectCenter(selectedObj);
+          const bounds = getObjectBounds(selectedObj);
+          const objRot = selectedObj.rotation || 0;
+          const objScaleX = selectedObj.scaleX || 1;
+          const objScaleY = selectedObj.scaleY || 1;
+
+          canvas.save();
+          canvas.translate(center.x, center.y);
+          canvas.rotate(objRot, 0, 0);
+
+          // Position the indicator at the top-left of the object
+          const indicatorX = -(bounds.width * objScaleX) / 2 - 16;
+          const indicatorY = -(bounds.height * objScaleY) / 2 - 16;
+
+          // Draw background circle for the lock icon
+          const indicatorPaint = new ck.Paint();
+          indicatorPaint.setAntiAlias(true);
+          indicatorPaint.setColor(ck.Color4f(0, 0.6, 1.0, 0.9)); // Blue with transparency
+          indicatorPaint.setStyle(ck.PaintStyle.Fill);
+          canvas.drawCircle(indicatorX, indicatorY, 8, indicatorPaint);
+
+          // Draw lock icon (simplified representation)
+          const lockPaint = new ck.Paint();
+          lockPaint.setAntiAlias(true);
+          lockPaint.setColor(ck.Color4f(1, 1, 1, 1)); // White
+          lockPaint.setStyle(ck.PaintStyle.Stroke);
+          lockPaint.setStrokeWidth(1.5);
+
+          // Draw lock body (rectangle)
+          canvas.drawRect(
+            ck.LTRBRect(
+              indicatorX - 3,
+              indicatorY - 1,
+              indicatorX + 3,
+              indicatorY + 3
+            ),
+            lockPaint
+          );
+
+          // Draw lock shackle (arc at the top)
+          lockPaint.setStyle(ck.PaintStyle.Stroke);
+          const path = new ck.Path();
+          path.addArc(
+            ck.LTRBRect(
+              indicatorX - 2,
+              indicatorY - 4,
+              indicatorX + 2,
+              indicatorY
+            ),
+            180, // start angle
+            180 // sweep angle
+          );
+          canvas.drawPath(path, lockPaint);
+
+          indicatorPaint.delete();
+          lockPaint.delete();
+          path.delete();
+          canvas.restore();
+        }
+      }
+
       canvas.restore(); // Global transform restore
 
       // 4. Live drawing preview (if any)
@@ -904,6 +1105,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       hoveredObjectIndex, // Removed from here, handled by its own useEffect
       drawSelectionHandlesInternal,
       selectedObjectIndex,
+      aspectRatioLocked,
     ]);
 
     useLayoutEffect(() => {
@@ -930,18 +1132,73 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         textareaRef.current = null;
         setShowTextInput(false);
       }
-    }, [currentTool, setShowTextInput, textareaRef, textToolActiveRef]);
+      // Reset space bar state when switching to text tool to avoid conflicts
+      if (currentTool === "text" && isSpacePressed) {
+        setIsSpacePressed(false);
+      }
+    }, [
+      currentTool,
+      setShowTextInput,
+      textareaRef,
+      textToolActiveRef,
+      isSpacePressed,
+    ]);
+
+    // Cleanup space bar state on unmount
+    useEffect(() => {
+      return () => {
+        setIsSpacePressed(false);
+      };
+    }, []);
+
+    // Add space bar event listeners
+    useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        // Ignore space bar if text input is active or user is typing in an input/textarea
+        // Also ignore if Alt or Control keys are pressed to prevent conflicts
+        if (
+          e.code === "Space" &&
+          !e.repeat &&
+          !e.altKey &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !showTextInput &&
+          !(document.activeElement instanceof HTMLInputElement) &&
+          !(document.activeElement instanceof HTMLTextAreaElement) &&
+          !(
+            document.activeElement instanceof HTMLElement &&
+            document.activeElement.contentEditable === "true"
+          )
+        ) {
+          e.preventDefault();
+          setIsSpacePressed(true);
+          setCursor();
+        }
+      };
+
+      const handleKeyUp = (e: KeyboardEvent) => {
+        if (e.code === "Space" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setIsSpacePressed(false);
+          setCursor();
+        }
+      };
+
+      // Add event listeners to window to capture space bar globally
+      window.addEventListener("keydown", handleKeyDown);
+      window.addEventListener("keyup", handleKeyUp);
+
+      return () => {
+        window.removeEventListener("keydown", handleKeyDown);
+        window.removeEventListener("keyup", handleKeyUp);
+      };
+    }, [setCursor, showTextInput]);
 
     useEffect(() => {
       if (canvasRef.current) {
-        let cursor: string;
-        if (currentTool === "none" || currentTool === "select")
-          cursor = "default";
-        else if (currentTool === "text") cursor = "text";
-        else cursor = "crosshair";
-        canvasRef.current.style.cursor = cursor;
+        setCursor();
       }
-    }, [currentTool]);
+    }, [setCursor]);
 
     useImperativeHandle(ref, () => ({
       getObjects: () => storeObjects,
@@ -1113,7 +1370,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
       const state = drawingStateRef.current;
 
-      if (e.buttons === 4 || e.metaKey) {
+      // Enable panning with space bar + left click or middle mouse button or meta key
+      if (e.buttons === 4 || e.metaKey || isSpacePressed) {
         setIsDragging(true);
         setDragStart({ x: mouseX, y: mouseY });
         return;
@@ -1371,7 +1629,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             const fs = obj.fontSize || 20;
             const typeface = fontMgr.matchFamilyStyle("Roboto", {});
             if (typeface) {
-              const fontForMeasure = new ck.Font(typeface, fs);
+              const font = new ck.Font(typeface, fs);
+              const glyphIDs = font.getGlyphIDs(obj.text);
+              const glyphWidths = font.getGlyphWidths(glyphIDs);
+              const fontForMeasure = new ck.Font(typeface, obj.fontSize || 20);
               const unscaledGlyphIDs = fontForMeasure.getGlyphIDs(obj.text);
               const unscaledGlyphWidths =
                 fontForMeasure.getGlyphWidths(unscaledGlyphIDs);
@@ -1380,6 +1641,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                 0
               );
               fontForMeasure.delete();
+              font.delete();
 
               const scaledTextWidth = unscaledTextWidth * sX;
               const scaledTextHeight = fs * sY;
@@ -1431,12 +1693,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         state.dragStartPivotWorld = null;
         state.dragStartHandleWorld = null;
 
-        if (canvasRef.current) {
-          canvasRef.current.style.cursor =
-            currentTool === "select" || currentTool === "none"
-              ? "default"
-              : "crosshair";
-        }
+        setCursor();
         redraw();
         return;
       }
@@ -1538,19 +1795,15 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         }
 
         setIsDrawing(false);
+        if (
+          canvasRef.current &&
+          (currentTool === "select" || currentTool === "none") &&
+          !state.activeHandle
+        ) {
+          setCursor();
+        }
         redraw();
-        return;
       }
-
-      setIsDrawing(false);
-      if (
-        canvasRef.current &&
-        (currentTool === "select" || currentTool === "none") &&
-        !state.activeHandle
-      ) {
-        canvasRef.current.style.cursor = "default";
-      }
-      redraw();
     };
 
     const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1654,8 +1907,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             e.stopPropagation();
             state.activeHandle = activeHandle;
             state.isObjectDragging = false;
-            if (canvasRef.current)
-              canvasRef.current.style.cursor = activeHandle.cursor;
+            if (canvasRef.current) setCursor(activeHandle.cursor);
             const selectedObject = storeObjects[selectedObjectIndex];
             const center = getObjectCenter(selectedObject);
             if (activeHandle.action === "rotate") {
@@ -1703,11 +1955,15 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           !state.activeHandle
         ) {
           const hover = hitTestHandles(x, y, state.handles);
-          if (hover) {
-            canvasEl.style.cursor =
-              hover.action === "rotate" ? ROTATE_CURSOR : hover.cursor;
+          console.log("Hover test result:", hover);
+          if (hover && !isSpacePressed) {
+            console.log("Setting cursor for hover:", hover.cursor);
+            console.log("Handle position:", hover.position);
+            console.log("Cursor URL:", hover.cursor);
+            setCursor(hover.cursor);
           } else {
-            canvasEl.style.cursor = "default";
+            console.log("Setting default cursor");
+            setCursor();
           }
         }
         if (!state.activeHandle || selectedObjectIndex === null) return;
@@ -1721,7 +1977,21 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const currentAngle = calculateAngle(center.x, center.y, x, y);
           const angleDiff = currentAngle - state.initialAngle;
           const newRotation = state.initialObjectRotation + angleDiff;
+
+          // Log cursor angle and color info
+          console.log("Rotation handle position:", state.activeHandle.position);
+          console.log("Current angle:", currentAngle);
+          console.log("Initial angle:", state.initialAngle);
+          console.log("Angle difference:", angleDiff);
+          console.log("New rotation:", newRotation);
+          console.log("Active handle cursor:", state.activeHandle.cursor);
+
           rotateObject(selectedIdx, newRotation);
+
+          // Maintain rotation cursor during active rotation
+          if (canvasRef.current) {
+            canvasRef.current.style.cursor = state.activeHandle.cursor;
+          }
         } else if (state.activeHandle.action === "scale") {
           if (
             !state.dragStartObject ||
@@ -1732,6 +2002,16 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
           const originalObj = state.dragStartObject;
           const pivotWorld = state.dragStartPivotWorld;
+
+          console.log("=== SCALING DEBUG ===");
+          console.log("Handle position:", state.activeHandle.position);
+          console.log("Cursor coords:", { x, y });
+          console.log("Original object scales:", {
+            scaleX: originalObj.scaleX || 1,
+            scaleY: originalObj.scaleY || 1,
+          });
+          console.log("Original object bounds:", getObjectBounds(originalObj));
+          console.log("Pivot world:", pivotWorld);
 
           const originalBounds = getObjectBounds(originalObj);
           const originalCenter = getObjectCenter(originalObj);
@@ -1761,9 +2041,14 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             -objectRotation
           );
 
+          console.log("Unrotated cursor:", unrotatedCursor);
+          console.log("Unrotated pivot:", unrotatedPivot);
+
           const handleNormVec = getNormalizedHandleVector(
             state.activeHandle.position
           );
+
+          console.log("Handle normalized vector:", handleNormVec);
 
           let newScaleX = originalObj.scaleX || 1;
           let newScaleY = originalObj.scaleY || 1;
@@ -1776,6 +2061,12 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               originalBounds.width *
               handleNormVec.x *
               (originalObj.scaleX || 1);
+            console.log("X scaling calculation:", {
+              currentProjectedDistX,
+              originalProjectedDistX,
+              originalBoundsWidth: originalBounds.width,
+              handleNormVecX: handleNormVec.x,
+            });
             if (Math.abs(originalProjectedDistX) > 1e-6) {
               newScaleX =
                 currentProjectedDistX /
@@ -1799,6 +2090,12 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               originalBounds.height *
               handleNormVec.y *
               (originalObj.scaleY || 1);
+            console.log("Y scaling calculation:", {
+              currentProjectedDistY,
+              originalProjectedDistY,
+              originalBoundsHeight: originalBounds.height,
+              handleNormVecY: handleNormVec.y,
+            });
             if (Math.abs(originalProjectedDistY) > 1e-6) {
               newScaleY =
                 currentProjectedDistY /
@@ -1816,6 +2113,11 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               newScaleY = -minDimension / scale / originalBounds.height;
           }
 
+          console.log("Before constraints - newScales:", {
+            newScaleX,
+            newScaleY,
+          });
+
           const minScaleFactor = 0.01;
           newScaleX =
             Math.abs(newScaleX) < minScaleFactor
@@ -1826,7 +2128,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               ? Math.sign(newScaleY) * minScaleFactor
               : newScaleY;
 
+          console.log("After min scale constraints:", { newScaleX, newScaleY });
+
           if (e.shiftKey && isCornerScaleHandle(state.activeHandle.position)) {
+            console.log("Applying shift key proportional scaling");
             const originalAspectRatio =
               originalBounds.width / originalBounds.height;
             if (handleNormVec.x !== 0 && handleNormVec.y !== 0) {
@@ -1876,10 +2181,58 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                   );
               }
             }
+          } else if (
+            aspectRatioLocked &&
+            isCornerScaleHandle(state.activeHandle.position)
+          ) {
+            console.log("Applying aspect ratio lock for corner handle");
+            // Apply aspect ratio locking when the lock is enabled for corner handles
+            const originalAspectRatio =
+              originalBounds.width / originalBounds.height;
+            if (handleNormVec.x !== 0 && handleNormVec.y !== 0) {
+              // Use the primary direction of movement to determine which scale to prioritize
+              const deltaX = Math.abs(unrotatedCursor.x - unrotatedPivot.x);
+              const deltaY = Math.abs(unrotatedCursor.y - unrotatedPivot.y);
+              const primaryDirection = deltaX > deltaY ? "x" : "y";
+
+              console.log("Primary direction:", primaryDirection, {
+                deltaX,
+                deltaY,
+              });
+
+              if (primaryDirection === "x") {
+                newScaleY =
+                  (newScaleX * (originalObj.scaleY || 1)) / originalAspectRatio;
+              } else {
+                newScaleX =
+                  newScaleY * originalAspectRatio * (originalObj.scaleX || 1);
+              }
+            }
+          } else if (
+            aspectRatioLocked &&
+            !isCornerScaleHandle(state.activeHandle.position)
+          ) {
+            console.log("Applying aspect ratio lock for edge handle");
+            // Apply aspect ratio locking for edge handles
+            const originalAspectRatio =
+              originalBounds.width / originalBounds.height;
+
+            if (handleNormVec.x !== 0 && handleNormVec.y === 0) {
+              // Horizontal edge handle - scale both dimensions proportionally
+              newScaleY =
+                (newScaleX * (originalObj.scaleY || 1)) / originalAspectRatio;
+            } else if (handleNormVec.x === 0 && handleNormVec.y !== 0) {
+              // Vertical edge handle - scale both dimensions proportionally
+              newScaleX =
+                newScaleY * originalAspectRatio * (originalObj.scaleX || 1);
+            }
           } else if (!isCornerScaleHandle(state.activeHandle.position)) {
+            console.log("Applying edge handle constraints");
             if (handleNormVec.x === 0) newScaleX = originalObj.scaleX || 1;
             if (handleNormVec.y === 0) newScaleY = originalObj.scaleY || 1;
           }
+
+          console.log("Final calculated scales:", { newScaleX, newScaleY });
 
           const newScaledHalfWidth = (originalBounds.width / 2) * newScaleX;
           const newScaledHalfHeight = (originalBounds.height / 2) * newScaleY;
@@ -1914,6 +2267,18 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const centerOffsetX = newWorldCenterX - originalObjCenter.x;
           const centerOffsetY = newWorldCenterY - originalObjCenter.y;
 
+          console.log("Position calculation:", {
+            newWorldCenter: { x: newWorldCenterX, y: newWorldCenterY },
+            originalObjCenter,
+            centerOffset: { x: centerOffsetX, y: centerOffsetY },
+            finalPosition: {
+              startX: originalObj.startX + centerOffsetX,
+              startY: originalObj.startY + centerOffsetY,
+              endX: originalObj.endX + centerOffsetX,
+              endY: originalObj.endY + centerOffsetY,
+            },
+          });
+
           // Update only scale and center offset, keep original dimensions
           updateObject(selectedIdx, {
             startX: originalObj.startX + centerOffsetX,
@@ -1923,6 +2288,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             scaleX: newScaleX,
             scaleY: newScaleY,
           });
+
+          console.log("=== END SCALING DEBUG ===");
 
           // Force redraw for immediate feedback
           requestAnimationFrame(redraw);
@@ -1938,10 +2305,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           state.dragStartPivotWorld = null;
           state.dragStartHandleWorld = null;
 
-          if (canvasRef.current) {
-            canvasRef.current.style.cursor = "default";
-          }
-
+          setCursor();
           redraw();
         }
       };
@@ -1966,6 +2330,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       setSelectedObjectIndex,
       rotateObject,
       scaleObject,
+      setCursor,
+      isSpacePressed,
+      aspectRatioLocked,
     ]);
 
     const getNormalizedHandleVector = (
@@ -2059,13 +2426,11 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       if (currentTool === "select") {
         // Only clear hover and active handle states, but keep the selection
         state.activeHandle = null;
-        if (canvasRef.current) {
-          canvasRef.current.style.cursor = "default";
-        }
+        setCursor();
         setHoveredObjectIndex(null);
         redraw();
       }
-    }, [currentTool, redraw]);
+    }, [currentTool, redraw, setCursor]);
 
     return (
       <div className="skia-canvas-container" ref={containerRef}>
@@ -2079,10 +2444,14 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           style={{
             cursor: isDragging
               ? "grabbing"
+              : isSpacePressed
+              ? "grab"
               : drawingStateRef.current.activeHandle
               ? drawingStateRef.current.activeHandle.cursor
-              : currentTool === "select"
+              : currentTool === "select" || currentTool === "none"
               ? "default"
+              : currentTool === "text"
+              ? "text"
               : "crosshair",
             touchAction: "none",
           }}

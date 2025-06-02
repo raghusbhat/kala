@@ -57,7 +57,7 @@ export default function ColorInput({
   };
 
   const handleSwatchClick = () => {
-    if (!buttonRef.current || !popupRef.current) return;
+    if (!buttonRef.current) return;
 
     const rect = buttonRef.current.getBoundingClientRect();
     const popupWidth = 300; // Approximate popup width
@@ -136,18 +136,27 @@ export default function ColorInput({
     if (!isOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+
       if (
         popupRef.current &&
         buttonRef.current &&
-        !popupRef.current.contains(e.target as Node) &&
-        !buttonRef.current.contains(e.target as Node)
+        !popupRef.current.contains(target) &&
+        !buttonRef.current.contains(target)
       ) {
         setIsOpen(false);
       }
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    // Add a small delay to avoid immediate closing
+    const timeoutId = setTimeout(() => {
+      document.addEventListener("mousedown", handleClickOutside);
+    }, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [isOpen]);
 
   // Extract color and opacity

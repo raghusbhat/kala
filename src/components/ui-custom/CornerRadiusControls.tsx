@@ -7,6 +7,8 @@ import {
   FiCornerDownLeft,
   FiCornerDownRight,
   FiLink,
+  FiUnlock,
+  FiLock,
 } from "react-icons/fi";
 import PropertyInput from "./PropertyInput";
 import type { CornerRadius } from "../../types";
@@ -97,7 +99,11 @@ export default function CornerRadiusControls({
                 : "text-muted-foreground"
             }`}
           >
-            <FiLink className="h-3 w-3" />
+            {safeCornerRadius.independent ? (
+              <FiUnlock className="h-3 w-3" />
+            ) : (
+              <FiLock className="h-3 w-3" />
+            )}
           </Button>
         </div>
 
