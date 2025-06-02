@@ -31,6 +31,7 @@ import {
   calculateDistance,
   drawFigmaHandle,
 } from "./skiaUtils";
+import { RefreshCw } from "lucide-react";
 
 let canvasKitPromise: Promise<{ ck: CanvasKitType; fm: FontMgr }> | null = null;
 let canvasKitInstance: CanvasKitType | null = null;
@@ -62,31 +63,6 @@ enum HandlePosition {
   RotationBottomRight = 12,
 }
 
-// Create corner-specific dotted curve rotation cursors with exact Figma angles
-// Using white stroke with black outline for visibility on both light and dark backgrounds
-// Made bigger (32x32) and more dashed for better visibility
-// Each curve is centered around the hotspot (16,16) and shows rotation around that corner
-// All cursors use consistent quarter-circle style with larger bend angles
-
-// Top-Left corner: quarter-circle curve extending from top-left corner
-const ROTATE_CURSOR_TL =
-  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M8,16 Q8,8 16,8'/><path class='curve-inner' d='M8,16 Q8,8 16,8'/><polygon class='arrow' points='8,16 5,13 8,14 11,17'/><polygon class='arrow' points='16,8 13,5 14,8 17,11'/></svg>\") 16 16, auto";
-
-// Top-Right corner: quarter-circle curve extending from top-right corner
-const ROTATE_CURSOR_TR =
-  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M16,8 Q24,8 24,16'/><path class='curve-inner' d='M16,8 Q24,8 24,16'/><polygon class='arrow' points='16,8 19,5 16,6 13,9'/><polygon class='arrow' points='24,16 27,13 24,14 21,17'/></svg>\") 16 16, auto";
-
-// Bottom-Left corner: quarter-circle curve extending from bottom-left corner (now consistent with others)
-const ROTATE_CURSOR_BL =
-  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M16,24 Q8,24 8,16'/><path class='curve-inner' d='M16,24 Q8,24 8,16'/><polygon class='arrow' points='16,24 19,27 16,26 13,23'/><polygon class='arrow' points='8,16 5,19 8,18 11,15'/></svg>\") 16 16, auto";
-
-// Bottom-Right corner: quarter-circle curve extending from bottom-right corner
-const ROTATE_CURSOR_BR =
-  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><defs><style>.arrow{fill:white;stroke:black;stroke-width:1px;}.curve{fill:none;stroke:black;stroke-width:5px;stroke-dasharray:4,3;stroke-linecap:round;} .curve-inner{fill:none;stroke:white;stroke-width:3px;stroke-dasharray:4,3;stroke-linecap:round;}</style></defs><path class='curve' d='M24,16 Q24,24 16,24'/><path class='curve-inner' d='M24,16 Q24,24 16,24'/><polygon class='arrow' points='24,16 27,19 24,18 21,15'/><polygon class='arrow' points='16,24 13,27 16,26 19,23'/></svg>\") 16 16, auto";
-
-// Use the top-left cursor as the default rotation cursor
-const ROTATE_CURSOR = ROTATE_CURSOR_TL;
-
 // Cursor styles for different handle positions
 const CURSOR_STYLES: Record<HandlePosition, string> = {
   [HandlePosition.TopLeft]: "nwse-resize",
@@ -97,11 +73,11 @@ const CURSOR_STYLES: Record<HandlePosition, string> = {
   [HandlePosition.Top]: "ns-resize",
   [HandlePosition.Right]: "ew-resize",
   [HandlePosition.Bottom]: "ns-resize",
-  [HandlePosition.Rotation]: ROTATE_CURSOR,
-  [HandlePosition.RotationTopLeft]: ROTATE_CURSOR_TL,
-  [HandlePosition.RotationTopRight]: ROTATE_CURSOR_TR,
-  [HandlePosition.RotationBottomLeft]: ROTATE_CURSOR_BL,
-  [HandlePosition.RotationBottomRight]: ROTATE_CURSOR_BR,
+  [HandlePosition.Rotation]: "default",
+  [HandlePosition.RotationTopLeft]: "default",
+  [HandlePosition.RotationTopRight]: "default",
+  [HandlePosition.RotationBottomLeft]: "default",
+  [HandlePosition.RotationBottomRight]: "default",
 };
 
 interface Handle {
@@ -155,6 +131,7 @@ interface DrawingState {
     endY: number;
   } | null;
   dragStartMouse: { x: number; y: number } | null;
+  lastCursorAngle?: number;
 }
 
 const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
@@ -253,6 +230,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       null
     );
 
+    // Add hoveredHandle state to track which handle is being hovered
+    const [hoveredHandle, setHoveredHandle] = useState<Handle | null>(null);
+
     // Helper function to set cursor consistently
     const setCursor = useCallback(
       (overrideCursor?: string) => {
@@ -295,28 +275,32 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         // const handleHitRadius = 6; // Hit detection radius (not currently used)
         // const rotateHandleOffset = 36; // Removed since we use Figma-style corner rotation
 
-        const blue = localCk.Color(0, 153, 255, 1.0);
+        const blue = localCk.Color(124, 58, 237, 1.0); // Primary purple color #7c3aed
         const white = localCk.Color(255, 255, 255, 1.0);
         const shadow = localCk.Color(0, 0, 0, Math.round(0.15 * 255));
 
-        // Draw the selection rectangle (now solid blue)
+        // Draw the selection rectangle (slightly outside object bounds to avoid overlap with object stroke)
         const rectPaint = new localCk.Paint();
         rectPaint.setAntiAlias(true);
         rectPaint.setColor(blue);
         rectPaint.setStyle(localCk.PaintStyle.Stroke);
         rectPaint.setStrokeWidth(1.5); // Keep stroke width consistent
-        // const dashEffectInstance = localCk.PathEffect?.MakeDash?.([4, 2], 0); // Removed for solid line
-        // if (dashEffectInstance) rectPaint.setPathEffect(dashEffectInstance);
 
+        const selectionOffset = 2; // Pixels to offset the selection rectangle outside the object
         canvas.save();
         canvas.translate(center.x, center.y);
         canvas.rotate(rotation, 0, 0);
 
-        // Draw the selection rectangle
         canvas.drawRect(
-          localCk.LTRBRect(-width / 2, -height / 2, width / 2, height / 2),
+          localCk.LTRBRect(
+            -width / 2 - selectionOffset,
+            -height / 2 - selectionOffset,
+            width / 2 + selectionOffset,
+            height / 2 + selectionOffset
+          ),
           rectPaint
         );
+
         rectPaint.delete();
 
         // Create handles for corners and edges
@@ -387,59 +371,44 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         const rotationHandles: Handle[] = [
           {
             position: HandlePosition.RotationTopLeft,
-            x: -width / 2 - rotationDistance, // Extend northwest from top-left corner
+            x: -width / 2 - rotationDistance,
             y: -height / 2 - rotationDistance,
-            cursor: ROTATE_CURSOR_TL,
+            cursor: "default", // Use default cursor, icon will be rendered visually
             action: "rotate" as const,
           },
           {
             position: HandlePosition.RotationTopRight,
-            x: width / 2 + rotationDistance, // Extend northeast from top-right corner
+            x: width / 2 + rotationDistance,
             y: -height / 2 - rotationDistance,
-            cursor: ROTATE_CURSOR_TR,
+            cursor: "default",
             action: "rotate" as const,
           },
           {
             position: HandlePosition.RotationBottomLeft,
-            x: -width / 2 - rotationDistance, // Extend southwest from bottom-left corner
+            x: -width / 2 - rotationDistance,
             y: height / 2 + rotationDistance,
-            cursor: ROTATE_CURSOR_BL,
+            cursor: "default",
             action: "rotate" as const,
           },
           {
             position: HandlePosition.RotationBottomRight,
-            x: width / 2 + rotationDistance, // Extend southeast from bottom-right corner
+            x: width / 2 + rotationDistance,
             y: height / 2 + rotationDistance,
-            cursor: ROTATE_CURSOR_BR,
+            cursor: "default",
             action: "rotate" as const,
           },
         ];
-
-        console.log(
-          "Created rotation handles:",
-          rotationHandles.map((h) => ({
-            position: h.position,
-            cursor: h.cursor.substring(0, 50) + "...",
-          }))
-        );
 
         // Add rotation handles to the main handles array
         handles.push(...rotationHandles);
 
         // Make corner handles slightly larger
-        const cornerHandleSize = handleSize * 1.5;
+        const cornerHandleSize = handleSize * 1.2; // Reduced from 1.5 to 1.2 for smaller corner handles
 
         // Draw each handle
         handles.forEach((handle) => {
           const isCorner = handle.position <= HandlePosition.BottomRight;
           const size = isCorner ? cornerHandleSize : handleSize;
-
-          console.log(
-            "Processing handle:",
-            handle.position,
-            "cursor before update:",
-            handle.cursor
-          );
 
           // Draw the handle (only draw corner handles, edge handles are invisible but hittable)
           if (isCorner) {
@@ -464,15 +433,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           if (handle.action !== "rotate") {
             handle.cursor = CURSOR_STYLES[handle.position];
           }
-
-          console.log(
-            "Handle after processing:",
-            handle.position,
-            "cursor:",
-            handle.cursor,
-            "action:",
-            handle.action
-          );
         });
 
         canvas.restore();
@@ -487,19 +447,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       handles: Handle[] | undefined
     ) => {
       if (!handles) {
-        console.log("No handles to test");
         return null;
       }
-
-      console.log("Testing handles at position:", { x, y });
-      console.log(
-        "Available handles:",
-        handles.map((h) => ({
-          position: h.position,
-          action: h.action,
-          cursor: h.cursor,
-        }))
-      );
 
       // First pass: Check for rotation handles (they have priority)
       for (const handle of handles) {
@@ -509,16 +458,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         ) {
           const threshold = 28; // Larger threshold for rotation handles to match Figma's generous hit area
           const distance = calculateDistance(x, y, handle.x, handle.y);
-          console.log(
-            `Rotation handle ${handle.position} distance: ${distance}, threshold: ${threshold}`
-          );
           if (distance <= threshold) {
-            console.log(
-              "HIT ROTATION HANDLE:",
-              handle.position,
-              "cursor:",
-              handle.cursor
-            );
             return handle;
           }
         }
@@ -530,18 +470,11 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const threshold = 14;
           const distance = calculateDistance(x, y, handle.x, handle.y);
           if (distance <= threshold) {
-            console.log(
-              "HIT SCALE HANDLE:",
-              handle.position,
-              "cursor:",
-              handle.cursor
-            );
             return handle;
           }
         }
       }
 
-      console.log("No handle hit");
       return null;
     };
 
@@ -585,6 +518,24 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         if (obj.strokeColor && obj.strokeColor !== "transparent") {
           const { r, g, b, a } = hexToRgba(obj.strokeColor);
           strokePaint.setColor(ck.Color4f(r, g, b, a));
+
+          // DEBUG: Log stroke color for selected object
+          if (index === selectedObjectIndex) {
+            console.log(`SELECTED OBJECT ${index} STROKE:`, {
+              strokeColor: obj.strokeColor,
+              strokeRGBA: { r, g, b, a },
+              strokeWidth: obj.strokeWidth,
+              objectType: obj.type,
+              fillColor: obj.fillColor,
+            });
+            if (strokePaint.getColor) {
+              const strokePaintColor = strokePaint.getColor();
+              console.log(
+                `SELECTED OBJECT ${index} strokePaint.getColor():`,
+                Array.from(strokePaintColor).join(",")
+              );
+            }
+          }
         } else {
           strokePaint.setColor(ck.Color4f(0, 0, 0, 0));
         }
@@ -870,7 +821,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         ) {
           const hoverPaint = new ck.Paint();
           hoverPaint.setAntiAlias(true);
-          hoverPaint.setColor(ck.Color4f(0.3, 0.7, 1.0, 0.4)); // Light blue, semi-transparent
+          hoverPaint.setColor(ck.Color4f(124 / 255, 58 / 255, 237 / 255, 0.4)); // Primary purple with transparency
           hoverPaint.setStyle(ck.PaintStyle.Stroke);
           hoverPaint.setStrokeWidth(1.5);
           const dashEffect = ck.PathEffect.MakeDash?.([3, 3], 0);
@@ -936,7 +887,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const highlightHeight = bounds.height * objScaleY;
 
           const hoverPaint = new ck.Paint();
-          hoverPaint.setColor(ck.Color(0, 153, 255, 1.0)); // Solid Blue (same as selection handles for consistency)
+          hoverPaint.setColor(ck.Color(124, 58, 237, 1.0)); // Primary purple color #7c3aed
           hoverPaint.setStyle(ck.PaintStyle.Stroke);
           hoverPaint.setStrokeWidth(1.5 / scale); // Consistent stroke width on screen
           hoverPaint.setAntiAlias(true);
@@ -1955,15 +1906,16 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           !state.activeHandle
         ) {
           const hover = hitTestHandles(x, y, state.handles);
-          console.log("Hover test result:", hover);
           if (hover && !isSpacePressed) {
             console.log("Setting cursor for hover:", hover.cursor);
             console.log("Handle position:", hover.position);
             console.log("Cursor URL:", hover.cursor);
             setCursor(hover.cursor);
+            setHoveredHandle(hover); // Track the hovered handle
           } else {
             console.log("Setting default cursor");
             setCursor();
+            setHoveredHandle(null); // Clear hovered handle
           }
         }
         if (!state.activeHandle || selectedObjectIndex === null) return;
@@ -1978,19 +1930,26 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const angleDiff = currentAngle - state.initialAngle;
           const newRotation = state.initialObjectRotation + angleDiff;
 
-          // Log cursor angle and color info
-          console.log("Rotation handle position:", state.activeHandle.position);
-          console.log("Current angle:", currentAngle);
-          console.log("Initial angle:", state.initialAngle);
-          console.log("Angle difference:", angleDiff);
-          console.log("New rotation:", newRotation);
-          console.log("Active handle cursor:", state.activeHandle.cursor);
-
           rotateObject(selectedIdx, newRotation);
 
-          // Maintain rotation cursor during active rotation
+          // Restore original: use static SVG cursor for the handle position
           if (canvasRef.current) {
-            canvasRef.current.style.cursor = state.activeHandle.cursor;
+            let cursor = "default";
+            switch (state.activeHandle.position) {
+              case HandlePosition.RotationTopLeft:
+                cursor = "default";
+                break;
+              case HandlePosition.RotationTopRight:
+                cursor = "default";
+                break;
+              case HandlePosition.RotationBottomLeft:
+                cursor = "default";
+                break;
+              case HandlePosition.RotationBottomRight:
+                cursor = "default";
+                break;
+            }
+            canvasRef.current.style.cursor = cursor;
           }
         } else if (state.activeHandle.action === "scale") {
           if (
@@ -2002,16 +1961,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
           const originalObj = state.dragStartObject;
           const pivotWorld = state.dragStartPivotWorld;
-
-          console.log("=== SCALING DEBUG ===");
-          console.log("Handle position:", state.activeHandle.position);
-          console.log("Cursor coords:", { x, y });
-          console.log("Original object scales:", {
-            scaleX: originalObj.scaleX || 1,
-            scaleY: originalObj.scaleY || 1,
-          });
-          console.log("Original object bounds:", getObjectBounds(originalObj));
-          console.log("Pivot world:", pivotWorld);
 
           const originalBounds = getObjectBounds(originalObj);
           const originalCenter = getObjectCenter(originalObj);
@@ -2041,14 +1990,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             -objectRotation
           );
 
-          console.log("Unrotated cursor:", unrotatedCursor);
-          console.log("Unrotated pivot:", unrotatedPivot);
-
           const handleNormVec = getNormalizedHandleVector(
             state.activeHandle.position
           );
-
-          console.log("Handle normalized vector:", handleNormVec);
 
           let newScaleX = originalObj.scaleX || 1;
           let newScaleY = originalObj.scaleY || 1;
@@ -2061,12 +2005,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               originalBounds.width *
               handleNormVec.x *
               (originalObj.scaleX || 1);
-            console.log("X scaling calculation:", {
-              currentProjectedDistX,
-              originalProjectedDistX,
-              originalBoundsWidth: originalBounds.width,
-              handleNormVecX: handleNormVec.x,
-            });
             if (Math.abs(originalProjectedDistX) > 1e-6) {
               newScaleX =
                 currentProjectedDistX /
@@ -2090,12 +2028,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               originalBounds.height *
               handleNormVec.y *
               (originalObj.scaleY || 1);
-            console.log("Y scaling calculation:", {
-              currentProjectedDistY,
-              originalProjectedDistY,
-              originalBoundsHeight: originalBounds.height,
-              handleNormVecY: handleNormVec.y,
-            });
             if (Math.abs(originalProjectedDistY) > 1e-6) {
               newScaleY =
                 currentProjectedDistY /
@@ -2113,11 +2045,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               newScaleY = -minDimension / scale / originalBounds.height;
           }
 
-          console.log("Before constraints - newScales:", {
-            newScaleX,
-            newScaleY,
-          });
-
           const minScaleFactor = 0.01;
           newScaleX =
             Math.abs(newScaleX) < minScaleFactor
@@ -2128,10 +2055,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               ? Math.sign(newScaleY) * minScaleFactor
               : newScaleY;
 
-          console.log("After min scale constraints:", { newScaleX, newScaleY });
-
           if (e.shiftKey && isCornerScaleHandle(state.activeHandle.position)) {
-            console.log("Applying shift key proportional scaling");
             const originalAspectRatio =
               originalBounds.width / originalBounds.height;
             if (handleNormVec.x !== 0 && handleNormVec.y !== 0) {
@@ -2185,8 +2109,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             aspectRatioLocked &&
             isCornerScaleHandle(state.activeHandle.position)
           ) {
-            console.log("Applying aspect ratio lock for corner handle");
-            // Apply aspect ratio locking when the lock is enabled for corner handles
             const originalAspectRatio =
               originalBounds.width / originalBounds.height;
             if (handleNormVec.x !== 0 && handleNormVec.y !== 0) {
@@ -2194,11 +2116,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               const deltaX = Math.abs(unrotatedCursor.x - unrotatedPivot.x);
               const deltaY = Math.abs(unrotatedCursor.y - unrotatedPivot.y);
               const primaryDirection = deltaX > deltaY ? "x" : "y";
-
-              console.log("Primary direction:", primaryDirection, {
-                deltaX,
-                deltaY,
-              });
 
               if (primaryDirection === "x") {
                 newScaleY =
@@ -2212,8 +2129,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             aspectRatioLocked &&
             !isCornerScaleHandle(state.activeHandle.position)
           ) {
-            console.log("Applying aspect ratio lock for edge handle");
-            // Apply aspect ratio locking for edge handles
             const originalAspectRatio =
               originalBounds.width / originalBounds.height;
 
@@ -2227,12 +2142,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                 newScaleY * originalAspectRatio * (originalObj.scaleX || 1);
             }
           } else if (!isCornerScaleHandle(state.activeHandle.position)) {
-            console.log("Applying edge handle constraints");
             if (handleNormVec.x === 0) newScaleX = originalObj.scaleX || 1;
             if (handleNormVec.y === 0) newScaleY = originalObj.scaleY || 1;
           }
-
-          console.log("Final calculated scales:", { newScaleX, newScaleY });
 
           const newScaledHalfWidth = (originalBounds.width / 2) * newScaleX;
           const newScaledHalfHeight = (originalBounds.height / 2) * newScaleY;
@@ -2267,19 +2179,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const centerOffsetX = newWorldCenterX - originalObjCenter.x;
           const centerOffsetY = newWorldCenterY - originalObjCenter.y;
 
-          console.log("Position calculation:", {
-            newWorldCenter: { x: newWorldCenterX, y: newWorldCenterY },
-            originalObjCenter,
-            centerOffset: { x: centerOffsetX, y: centerOffsetY },
-            finalPosition: {
-              startX: originalObj.startX + centerOffsetX,
-              startY: originalObj.startY + centerOffsetY,
-              endX: originalObj.endX + centerOffsetX,
-              endY: originalObj.endY + centerOffsetY,
-            },
-          });
-
-          // Update only scale and center offset, keep original dimensions
           updateObject(selectedIdx, {
             startX: originalObj.startX + centerOffsetX,
             startY: originalObj.startY + centerOffsetY,
@@ -2288,8 +2187,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             scaleX: newScaleX,
             scaleY: newScaleY,
           });
-
-          console.log("=== END SCALING DEBUG ===");
 
           // Force redraw for immediate feedback
           requestAnimationFrame(redraw);
@@ -2456,6 +2353,115 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             touchAction: "none",
           }}
         />
+        {hoveredHandle && hoveredHandle.action === "rotate" && (
+          <RefreshCw
+            style={{
+              position: "absolute",
+              left: (() => {
+                // During rotation, calculate live handle position
+                if (
+                  drawingStateRef.current.activeHandle &&
+                  selectedObjectIndex !== null
+                ) {
+                  const selectedObject = storeObjects[selectedObjectIndex];
+                  const center = getObjectCenter(selectedObject);
+                  const bounds = getObjectBounds(selectedObject);
+                  const rotation = selectedObject.rotation || 0;
+                  const rotationDistance = 20;
+
+                  let handleX = center.x;
+                  let handleY = center.y;
+
+                  // Calculate base handle position relative to object center
+                  switch (hoveredHandle.position) {
+                    case HandlePosition.RotationTopLeft:
+                      handleX = center.x - bounds.width / 2 - rotationDistance;
+                      handleY = center.y - bounds.height / 2 - rotationDistance;
+                      break;
+                    case HandlePosition.RotationTopRight:
+                      handleX = center.x + bounds.width / 2 + rotationDistance;
+                      handleY = center.y - bounds.height / 2 - rotationDistance;
+                      break;
+                    case HandlePosition.RotationBottomLeft:
+                      handleX = center.x - bounds.width / 2 - rotationDistance;
+                      handleY = center.y + bounds.height / 2 + rotationDistance;
+                      break;
+                    case HandlePosition.RotationBottomRight:
+                      handleX = center.x + bounds.width / 2 + rotationDistance;
+                      handleY = center.y + bounds.height / 2 + rotationDistance;
+                      break;
+                  }
+
+                  // Rotate the handle position around the object center
+                  const rotatedHandle = rotatePoint(
+                    handleX,
+                    handleY,
+                    center.x,
+                    center.y,
+                    rotation
+                  );
+                  return rotatedHandle.x * scale + offset.x - 8;
+                }
+                // Fallback to stored position if not actively rotating
+                return hoveredHandle.x * scale + offset.x - 8;
+              })(),
+              top: (() => {
+                // During rotation, calculate live handle position
+                if (
+                  drawingStateRef.current.activeHandle &&
+                  selectedObjectIndex !== null
+                ) {
+                  const selectedObject = storeObjects[selectedObjectIndex];
+                  const center = getObjectCenter(selectedObject);
+                  const bounds = getObjectBounds(selectedObject);
+                  const rotation = selectedObject.rotation || 0;
+                  const rotationDistance = 20;
+
+                  let handleX = center.x;
+                  let handleY = center.y;
+
+                  // Calculate base handle position relative to object center
+                  switch (hoveredHandle.position) {
+                    case HandlePosition.RotationTopLeft:
+                      handleX = center.x - bounds.width / 2 - rotationDistance;
+                      handleY = center.y - bounds.height / 2 - rotationDistance;
+                      break;
+                    case HandlePosition.RotationTopRight:
+                      handleX = center.x + bounds.width / 2 + rotationDistance;
+                      handleY = center.y - bounds.height / 2 - rotationDistance;
+                      break;
+                    case HandlePosition.RotationBottomLeft:
+                      handleX = center.x - bounds.width / 2 - rotationDistance;
+                      handleY = center.y + bounds.height / 2 + rotationDistance;
+                      break;
+                    case HandlePosition.RotationBottomRight:
+                      handleX = center.x + bounds.width / 2 + rotationDistance;
+                      handleY = center.y + bounds.height / 2 + rotationDistance;
+                      break;
+                  }
+
+                  // Rotate the handle position around the object center
+                  const rotatedHandle = rotatePoint(
+                    handleX,
+                    handleY,
+                    center.x,
+                    center.y,
+                    rotation
+                  );
+                  return rotatedHandle.y * scale + offset.y - 8;
+                }
+                // Fallback to stored position if not actively rotating
+                return hoveredHandle.y * scale + offset.y - 8;
+              })(),
+              pointerEvents: "none",
+              zIndex: 10,
+              color: "#7c3aed",
+              width: 16,
+              height: 16,
+            }}
+            strokeWidth={2}
+          />
+        )}
       </div>
     );
   }
