@@ -43,6 +43,7 @@ export type DrawingTool =
   | "rectangle"
   | "ellipse"
   | "line"
+  | "pencil"
   | "pen"
   | "text";
 
@@ -232,6 +233,15 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
     // Add hoveredHandle state to track which handle is being hovered
     const [hoveredHandle, setHoveredHandle] = useState<Handle | null>(null);
+
+    // 1. Add state for pen tool anchor points
+    const [penAnchors, setPenAnchors] = useState<{ x: number; y: number }[]>(
+      []
+    );
+    const [isPenDrawing, setIsPenDrawing] = useState(false);
+
+    // 1. Add state for pen tool first-anchor hover
+    const [isHoveringFirstAnchor, setIsHoveringFirstAnchor] = useState(false);
 
     // Helper function to set cursor consistently
     const setCursor = useCallback(
@@ -1039,6 +1049,46 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         canvas.restore();
       }
 
+      // 5. Draw pen anchors and preview path in redraw()
+      // Inside redraw(), after drawing all objects, add:
+      if (
+        currentTool === "pen" &&
+        isPenDrawing &&
+        penAnchors.length > 0 &&
+        ck
+      ) {
+        const previewPaint = new ck.Paint();
+        previewPaint.setAntiAlias(true);
+        previewPaint.setColor(ck.Color4f(0, 0, 0, 1));
+        previewPaint.setStrokeWidth(strokeWidth);
+        previewPaint.setStyle(ck.PaintStyle.Stroke);
+        const path = new ck.Path();
+        path.moveTo(penAnchors[0].x, penAnchors[0].y);
+        for (let i = 1; i < penAnchors.length; i++) {
+          path.lineTo(penAnchors[i].x, penAnchors[i].y);
+        }
+        drawingStateRef.current.canvas?.drawPath(path, previewPaint);
+        // Draw anchor points
+        const anchorPaint = new ck.Paint();
+        anchorPaint.setAntiAlias(true);
+        anchorPaint.setColor(ck.Color4f(0.2, 0.6, 1, 1));
+        anchorPaint.setStyle(ck.PaintStyle.Fill);
+        for (let i = 0; i < penAnchors.length; i++) {
+          const pt = penAnchors[i];
+          let r = 4;
+          if (i === 0 && isHoveringFirstAnchor && penAnchors.length > 2) r = 7; // highlight first anchor
+          drawingStateRef.current.canvas?.drawCircle(
+            pt.x,
+            pt.y,
+            r,
+            anchorPaint
+          );
+        }
+        anchorPaint.delete();
+        previewPaint.delete();
+        path.delete();
+      }
+
       drawingStateRef.current.surface!.flush();
     }, [
       ck,
@@ -1057,6 +1107,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       drawSelectionHandlesInternal,
       selectedObjectIndex,
       aspectRatioLocked,
+      penAnchors,
+      isPenDrawing,
+      isHoveringFirstAnchor,
     ]);
 
     useLayoutEffect(() => {
@@ -1331,6 +1384,56 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       if (currentTool === "text") {
         activateTextTool(mouseX, mouseY, worldX, worldY, handleTextSubmit);
         return;
+      }
+
+      // --- PEN TOOL LOGIC ---
+      if ((currentTool as DrawingTool) === "pen") {
+        if (isPenDrawing && isHoveringFirstAnchor && penAnchors.length > 2) {
+          // Only on click, close the path and create the object
+          if (!ck) return;
+          const path = new ck.Path();
+          path.moveTo(penAnchors[0].x, penAnchors[0].y);
+          for (let i = 1; i < penAnchors.length; i++) {
+            path.lineTo(penAnchors[i].x, penAnchors[i].y);
+          }
+          path.close();
+          const minX = Math.min(...penAnchors.map((p) => p.x));
+          const minY = Math.min(...penAnchors.map((p) => p.y));
+          const maxX = Math.max(...penAnchors.map((p) => p.x));
+          const maxY = Math.max(...penAnchors.map((p) => p.y));
+          const penObject = {
+            type: "pen" as const,
+            startX: minX,
+            startY: minY,
+            endX: maxX,
+            endY: maxY,
+            path,
+            fillColor: "transparent",
+            strokeColor: currentStrokeColor,
+            strokeWidth,
+            visible: true,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+          };
+          if (onObjectCreated) onObjectCreated(penObject);
+          setPenAnchors([]);
+          setIsPenDrawing(false);
+          setIsHoveringFirstAnchor(false);
+          setCurrentTool("select");
+          redraw();
+          return;
+        } else {
+          // Not closing, just add anchor
+          if (!isPenDrawing) {
+            setPenAnchors([{ x: worldX, y: worldY }]);
+            setIsPenDrawing(true);
+          } else {
+            setPenAnchors((prev) => [...prev, { x: worldX, y: worldY }]);
+          }
+          redraw();
+          return;
+        }
       }
 
       if (currentTool === "select" || currentTool === "none") {
@@ -1626,6 +1729,13 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         }
         redraw();
       }
+
+      // 2. In handleCanvasMouseMove, add hover detection for first anchor
+      if (currentTool === "pen" && isPenDrawing && penAnchors.length > 2) {
+        const { x, y } = penAnchors[0];
+        const dist = Math.sqrt((worldX - x) ** 2 + (worldY - y) ** 2);
+        setIsHoveringFirstAnchor(dist < 10); // 10px radius
+      }
     };
 
     const handleMouseUp = () => {
@@ -1714,7 +1824,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             const pathCopy = state.path.copy();
             completeObjectData = {
               ...baseObjectProperties,
-              type: "pen",
+              type: "pen" as const,
               endX,
               endY,
               path: pathCopy,
@@ -2329,6 +2439,103 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       }
     }, [currentTool, redraw, setCursor]);
 
+    // 3. Add double-click handler to finish pen path
+    const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (
+        (currentTool as DrawingTool) === "pen" &&
+        isPenDrawing &&
+        penAnchors.length > 1
+      ) {
+        // Create Skia Path from anchor points
+        if (!ck) return;
+        const path = new ck.Path();
+        path.moveTo(penAnchors[0].x, penAnchors[0].y);
+        for (let i = 1; i < penAnchors.length; i++) {
+          path.lineTo(penAnchors[i].x, penAnchors[i].y);
+        }
+        // Create object
+        const minX = Math.min(...penAnchors.map((p) => p.x));
+        const minY = Math.min(...penAnchors.map((p) => p.y));
+        const maxX = Math.max(...penAnchors.map((p) => p.x));
+        const maxY = Math.max(...penAnchors.map((p) => p.y));
+        const penObject = {
+          type: "pen" as const,
+          startX: minX,
+          startY: minY,
+          endX: maxX,
+          endY: maxY,
+          path,
+          fillColor: "transparent",
+          strokeColor: currentStrokeColor,
+          strokeWidth,
+          visible: true,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
+        };
+        if (onObjectCreated) onObjectCreated(penObject);
+        setPenAnchors([]);
+        setIsPenDrawing(false);
+        setCurrentTool("select");
+        redraw();
+      }
+    };
+
+    // 4. Add Enter key handler to finish pen path
+    useEffect(() => {
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (
+          (currentTool as DrawingTool) === "pen" &&
+          isPenDrawing &&
+          penAnchors.length > 1 &&
+          (e.key === "Enter" || e.key === "Return")
+        ) {
+          if (!ck) return;
+          const path = new ck.Path();
+          path.moveTo(penAnchors[0].x, penAnchors[0].y);
+          for (let i = 1; i < penAnchors.length; i++) {
+            path.lineTo(penAnchors[i].x, penAnchors[i].y);
+          }
+          const minX = Math.min(...penAnchors.map((p) => p.x));
+          const minY = Math.min(...penAnchors.map((p) => p.y));
+          const maxX = Math.max(...penAnchors.map((p) => p.x));
+          const maxY = Math.max(...penAnchors.map((p) => p.y));
+          const penObject = {
+            type: "pen" as const,
+            startX: minX,
+            startY: minY,
+            endX: maxX,
+            endY: maxY,
+            path,
+            fillColor: "transparent",
+            strokeColor: currentStrokeColor,
+            strokeWidth,
+            visible: true,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+          };
+          if (onObjectCreated) onObjectCreated(penObject);
+          setPenAnchors([]);
+          setIsPenDrawing(false);
+          setCurrentTool("select");
+          redraw();
+        }
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }, [
+      currentTool,
+      isPenDrawing,
+      penAnchors,
+      ck,
+      currentStrokeColor,
+      strokeWidth,
+      onObjectCreated,
+      setCurrentTool,
+      redraw,
+    ]);
+
     return (
       <div className="skia-canvas-container" ref={containerRef}>
         <canvas
@@ -2338,12 +2545,14 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           onMouseUp={handleMouseUp}
           onWheel={handleWheel}
           onMouseLeave={handleCanvasMouseLeave}
+          onDoubleClick={handleDoubleClick}
           style={{
             cursor: isDragging
               ? "grabbing"
               : isSpacePressed
               ? "grab"
-              : drawingStateRef.current.activeHandle
+              : drawingStateRef.current.activeHandle &&
+                drawingStateRef.current.activeHandle.cursor
               ? drawingStateRef.current.activeHandle.cursor
               : currentTool === "select" || currentTool === "none"
               ? "default"
@@ -2353,115 +2562,126 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             touchAction: "none",
           }}
         />
-        {hoveredHandle && hoveredHandle.action === "rotate" && (
-          <RefreshCw
-            style={{
-              position: "absolute",
-              left: (() => {
-                // During rotation, calculate live handle position
-                if (
-                  drawingStateRef.current.activeHandle &&
-                  selectedObjectIndex !== null
-                ) {
-                  const selectedObject = storeObjects[selectedObjectIndex];
-                  const center = getObjectCenter(selectedObject);
-                  const bounds = getObjectBounds(selectedObject);
-                  const rotation = selectedObject.rotation || 0;
-                  const rotationDistance = 20;
-
-                  let handleX = center.x;
-                  let handleY = center.y;
-
-                  // Calculate base handle position relative to object center
-                  switch (hoveredHandle.position) {
-                    case HandlePosition.RotationTopLeft:
-                      handleX = center.x - bounds.width / 2 - rotationDistance;
-                      handleY = center.y - bounds.height / 2 - rotationDistance;
-                      break;
-                    case HandlePosition.RotationTopRight:
-                      handleX = center.x + bounds.width / 2 + rotationDistance;
-                      handleY = center.y - bounds.height / 2 - rotationDistance;
-                      break;
-                    case HandlePosition.RotationBottomLeft:
-                      handleX = center.x - bounds.width / 2 - rotationDistance;
-                      handleY = center.y + bounds.height / 2 + rotationDistance;
-                      break;
-                    case HandlePosition.RotationBottomRight:
-                      handleX = center.x + bounds.width / 2 + rotationDistance;
-                      handleY = center.y + bounds.height / 2 + rotationDistance;
-                      break;
+        {hoveredHandle &&
+          hoveredHandle.action === "rotate" &&
+          selectedObjectIndex !== null &&
+          storeObjects[selectedObjectIndex] && (
+            <RefreshCw
+              style={{
+                position: "absolute",
+                left: (() => {
+                  if (
+                    drawingStateRef.current.activeHandle &&
+                    selectedObjectIndex !== null &&
+                    storeObjects[selectedObjectIndex]
+                  ) {
+                    const selectedObject = storeObjects[selectedObjectIndex];
+                    const center = getObjectCenter(selectedObject);
+                    const bounds = getObjectBounds(selectedObject);
+                    const rotation = selectedObject.rotation || 0;
+                    const rotationDistance = 20;
+                    let handleX = center.x;
+                    let handleY = center.y;
+                    switch (hoveredHandle.position) {
+                      case HandlePosition.RotationTopLeft:
+                        handleX =
+                          center.x - bounds.width / 2 - rotationDistance;
+                        handleY =
+                          center.y - bounds.height / 2 - rotationDistance;
+                        break;
+                      case HandlePosition.RotationTopRight:
+                        handleX =
+                          center.x + bounds.width / 2 + rotationDistance;
+                        handleY =
+                          center.y - bounds.height / 2 - rotationDistance;
+                        break;
+                      case HandlePosition.RotationBottomLeft:
+                        handleX =
+                          center.x - bounds.width / 2 - rotationDistance;
+                        handleY =
+                          center.y + bounds.height / 2 + rotationDistance;
+                        break;
+                      case HandlePosition.RotationBottomRight:
+                        handleX =
+                          center.x + bounds.width / 2 + rotationDistance;
+                        handleY =
+                          center.y + bounds.height / 2 + rotationDistance;
+                        break;
+                    }
+                    const rotatedHandle = rotatePoint(
+                      handleX,
+                      handleY,
+                      center.x,
+                      center.y,
+                      rotation
+                    );
+                    return rotatedHandle.x * scale + offset.x - 8;
                   }
-
-                  // Rotate the handle position around the object center
-                  const rotatedHandle = rotatePoint(
-                    handleX,
-                    handleY,
-                    center.x,
-                    center.y,
-                    rotation
-                  );
-                  return rotatedHandle.x * scale + offset.x - 8;
-                }
-                // Fallback to stored position if not actively rotating
-                return hoveredHandle.x * scale + offset.x - 8;
-              })(),
-              top: (() => {
-                // During rotation, calculate live handle position
-                if (
-                  drawingStateRef.current.activeHandle &&
-                  selectedObjectIndex !== null
-                ) {
-                  const selectedObject = storeObjects[selectedObjectIndex];
-                  const center = getObjectCenter(selectedObject);
-                  const bounds = getObjectBounds(selectedObject);
-                  const rotation = selectedObject.rotation || 0;
-                  const rotationDistance = 20;
-
-                  let handleX = center.x;
-                  let handleY = center.y;
-
-                  // Calculate base handle position relative to object center
-                  switch (hoveredHandle.position) {
-                    case HandlePosition.RotationTopLeft:
-                      handleX = center.x - bounds.width / 2 - rotationDistance;
-                      handleY = center.y - bounds.height / 2 - rotationDistance;
-                      break;
-                    case HandlePosition.RotationTopRight:
-                      handleX = center.x + bounds.width / 2 + rotationDistance;
-                      handleY = center.y - bounds.height / 2 - rotationDistance;
-                      break;
-                    case HandlePosition.RotationBottomLeft:
-                      handleX = center.x - bounds.width / 2 - rotationDistance;
-                      handleY = center.y + bounds.height / 2 + rotationDistance;
-                      break;
-                    case HandlePosition.RotationBottomRight:
-                      handleX = center.x + bounds.width / 2 + rotationDistance;
-                      handleY = center.y + bounds.height / 2 + rotationDistance;
-                      break;
+                  return hoveredHandle
+                    ? hoveredHandle.x * scale + offset.x - 8
+                    : 0;
+                })(),
+                top: (() => {
+                  if (
+                    drawingStateRef.current.activeHandle &&
+                    selectedObjectIndex !== null &&
+                    storeObjects[selectedObjectIndex]
+                  ) {
+                    const selectedObject = storeObjects[selectedObjectIndex];
+                    const center = getObjectCenter(selectedObject);
+                    const bounds = getObjectBounds(selectedObject);
+                    const rotation = selectedObject.rotation || 0;
+                    const rotationDistance = 20;
+                    let handleX = center.x;
+                    let handleY = center.y;
+                    switch (hoveredHandle.position) {
+                      case HandlePosition.RotationTopLeft:
+                        handleX =
+                          center.x - bounds.width / 2 - rotationDistance;
+                        handleY =
+                          center.y - bounds.height / 2 - rotationDistance;
+                        break;
+                      case HandlePosition.RotationTopRight:
+                        handleX =
+                          center.x + bounds.width / 2 + rotationDistance;
+                        handleY =
+                          center.y - bounds.height / 2 - rotationDistance;
+                        break;
+                      case HandlePosition.RotationBottomLeft:
+                        handleX =
+                          center.x - bounds.width / 2 - rotationDistance;
+                        handleY =
+                          center.y + bounds.height / 2 + rotationDistance;
+                        break;
+                      case HandlePosition.RotationBottomRight:
+                        handleX =
+                          center.x + bounds.width / 2 + rotationDistance;
+                        handleY =
+                          center.y + bounds.height / 2 + rotationDistance;
+                        break;
+                    }
+                    const rotatedHandle = rotatePoint(
+                      handleX,
+                      handleY,
+                      center.x,
+                      center.y,
+                      rotation
+                    );
+                    return rotatedHandle.y * scale + offset.y - 8;
                   }
-
-                  // Rotate the handle position around the object center
-                  const rotatedHandle = rotatePoint(
-                    handleX,
-                    handleY,
-                    center.x,
-                    center.y,
-                    rotation
-                  );
-                  return rotatedHandle.y * scale + offset.y - 8;
-                }
-                // Fallback to stored position if not actively rotating
-                return hoveredHandle.y * scale + offset.y - 8;
-              })(),
-              pointerEvents: "none",
-              zIndex: 10,
-              color: "#7c3aed",
-              width: 16,
-              height: 16,
-            }}
-            strokeWidth={2}
-          />
-        )}
+                  return hoveredHandle
+                    ? hoveredHandle.y * scale + offset.y - 8
+                    : 0;
+                })(),
+                pointerEvents: "none",
+                zIndex: 10,
+                color: "#7c3aed",
+                width: 16,
+                height: 16,
+              }}
+              strokeWidth={2}
+            />
+          )}
       </div>
     );
   }

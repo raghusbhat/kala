@@ -9,6 +9,7 @@ export type DrawingTool =
   | "rectangle"
   | "ellipse"
   | "line"
+  | "pencil"
   | "pen"
   | "text";
 
@@ -46,7 +47,7 @@ export interface BaseObject {
 }
 
 export interface ShapeObject extends BaseObject {
-  type: "rectangle" | "ellipse" | "line" | "pen" | "select";
+  type: "rectangle" | "ellipse" | "line" | "pencil" | "pen" | "select";
 }
 
 export interface TextObject extends BaseObject {
@@ -56,7 +57,11 @@ export interface TextObject extends BaseObject {
   fontSize: number;
 }
 
-export type CanvasObject = ShapeObject | TextObject;
+export type CanvasObject =
+  | (ShapeObject & {
+      type: "rectangle" | "ellipse" | "line" | "pencil" | "pen" | "select";
+    })
+  | (TextObject & { type: "text" });
 
 // Define the store's state shape
 interface CanvasState {
@@ -137,22 +142,24 @@ export const useCanvasStore = create<CanvasState>((set) => ({
         strokeColor: object.strokeColor || "transparent",
         fillColor: object.fillColor || "#FFFFFF",
       };
-      // For text objects, check if we already have an object with the same ID
-      if (object.type === "text" && "id" in object) {
-        const textObj = object as TextObject;
+      // Type guard for text object
+      if (objectWithDefaults.type === "text") {
+        const textObj = objectWithDefaults as TextObject;
         const existingIndex = state.objects.findIndex(
           (obj) => obj.type === "text" && "id" in obj && obj.id === textObj.id
         );
-
         if (existingIndex >= 0) {
           // Update existing object instead of adding a new one
           const newObjects = [...state.objects];
           newObjects[existingIndex] = { ...textObj };
           return { objects: newObjects };
         }
+        return { objects: [...state.objects, textObj] };
+      } else {
+        // For all other shapes (rectangle, ellipse, line, pencil, pen, select)
+        const shapeObj = objectWithDefaults as ShapeObject;
+        return { objects: [...state.objects, shapeObj] };
       }
-
-      return { objects: [...state.objects, objectWithDefaults] };
     }),
   updateObject: (index, object) =>
     set((state) => {

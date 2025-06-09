@@ -15,6 +15,7 @@ import {
   FiMaximize,
   FiPlus,
   FiMinus,
+  FiPenTool,
 } from "react-icons/fi";
 import SkiaCanvas, { DrawingTool } from "./SkiaCanvas/SkiaCanvas";
 import ToolButton from "./ui-custom/ToolButton";
@@ -84,9 +85,16 @@ export default function CanvasArea({
               tooltip="Ellipse Tool (O)"
             />
             <ToolButton
-              tool="pen"
+              tool="pencil"
               currentTool={currentTool}
               icon={FiEdit2}
+              onClick={() => handleToolChange("pencil")}
+              tooltip="Pencil Tool (B)"
+            />
+            <ToolButton
+              tool="pen"
+              currentTool={currentTool}
+              icon={FiPenTool}
               onClick={() => handleToolChange("pen")}
               tooltip="Pen Tool (P)"
             />
