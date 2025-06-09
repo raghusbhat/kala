@@ -243,6 +243,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
     // 1. Add state for pen tool first-anchor hover
     const [isHoveringFirstAnchor, setIsHoveringFirstAnchor] = useState(false);
 
+    // Add state for pen anchor edit mode
+    const [penEditMode, setPenEditMode] = useState(false);
+
     // Helper function to set cursor consistently
     const setCursor = useCallback(
       (overrideCursor?: string) => {
@@ -1429,7 +1432,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           setPenAnchors([]);
           setIsPenDrawing(false);
           setIsHoveringFirstAnchor(false);
-          setCurrentTool("select");
+          setPenEditMode(true); // Enter anchor edit mode
           redraw();
           return;
         } else {
@@ -2586,8 +2589,11 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           if (e.key === "Escape") {
             if (isPenDrawing) {
               setIsPenDrawing(false);
-            } else if (penAnchors.length > 0) {
+              setPenEditMode(true); // Enter anchor edit mode
+            } else if (penEditMode) {
+              // Second escape: exit pen tool
               setPenAnchors([]);
+              setPenEditMode(false);
               setCurrentTool("select");
             }
           }
@@ -2597,7 +2603,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       return () => {
         window.removeEventListener("keydown", onKeyDown);
       };
-    }, [currentTool, isPenDrawing, penAnchors, setCurrentTool]);
+    }, [currentTool, isPenDrawing, penAnchors, penEditMode, setCurrentTool]);
 
     // Add effect to create open pen object if exiting pen mode with >=2 anchors and not closing the loop
     useEffect(() => {
