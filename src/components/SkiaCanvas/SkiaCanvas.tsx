@@ -808,7 +808,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               width: ck.FontWidth.Normal,
               slant: ck.FontSlant.Upright,
             });
-            if (!typeface) throw new Error("Roboto typeface not found");
+            if (!typeface) {
+              console.error("Roboto typeface not found");
+              return;
+            }
             const font = new ck.Font(typeface, obj.fontSize || 20);
             canvas.drawText(
               obj.text,
@@ -1263,6 +1266,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               ).then((res) => res.arrayBuffer());
               const loadedFM = loadedCK.FontMgr.FromData(fontData);
               if (!loadedFM) {
+                console.error("Font manager creation failed");
                 throw new Error("Font manager creation failed");
               }
               canvasKitInstance = loadedCK;
@@ -1270,6 +1274,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               return { ck: loadedCK, fm: loadedFM };
             } catch (error) {
               canvasKitPromise = null;
+              console.error(error);
               throw error;
             }
           })();
@@ -1277,6 +1282,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         }
         try {
           const { ck: resolvedCK, fm: resolvedFM } = await canvasKitPromise;
+          if (!resolvedCK || !resolvedFM) {
+            console.error("CanvasKit or FontMgr not loaded");
+            return;
+          }
           setCk(resolvedCK);
           setFontMgr(resolvedFM);
         } catch (error) {}
@@ -1541,11 +1550,21 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           state.dragStartMouse = { x: worldX, y: worldY };
 
           // Also preserve the current scale values for dragging
-          state.dragStartObject = {
-            ...objToDrag,
-            scaleX: objToDrag.scaleX || 1,
-            scaleY: objToDrag.scaleY || 1,
-          };
+          // For pen objects, store a copy of the original path
+          if (objToDrag.type === "pen" && objToDrag.path) {
+            state.dragStartObject = {
+              ...objToDrag,
+              path: objToDrag.path.copy(),
+              scaleX: objToDrag.scaleX || 1,
+              scaleY: objToDrag.scaleY || 1,
+            };
+          } else {
+            state.dragStartObject = {
+              ...objToDrag,
+              scaleX: objToDrag.scaleX || 1,
+              scaleY: objToDrag.scaleY || 1,
+            };
+          }
 
           if (currentTool === "none") {
             setCurrentTool("select");
@@ -1617,14 +1636,38 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
         if (selectedObjectIndex !== null) {
           const currentObject = storeObjects[selectedObjectIndex];
-          updateObject(selectedObjectIndex, {
-            startX: newStartX,
-            startY: newStartY,
-            endX: newEndX,
-            endY: newEndY,
-            scaleX: currentObject.scaleX || 1,
-            scaleY: currentObject.scaleY || 1,
-          });
+          // If pen object, translate the original path
+          if (
+            currentObject.type === "pen" &&
+            state.dragStartObject &&
+            state.dragStartObject.type === "pen" &&
+            state.dragStartObject.path &&
+            ck
+          ) {
+            const pathCopy = state.dragStartObject.path.copy();
+            const transform = ck.Matrix.identity();
+            transform[2] = dx; // translate X
+            transform[5] = dy; // translate Y
+            pathCopy.transform(transform);
+            updateObject(selectedObjectIndex, {
+              startX: newStartX,
+              startY: newStartY,
+              endX: newEndX,
+              endY: newEndY,
+              scaleX: currentObject.scaleX || 1,
+              scaleY: currentObject.scaleY || 1,
+              path: pathCopy,
+            });
+          } else {
+            updateObject(selectedObjectIndex, {
+              startX: newStartX,
+              startY: newStartY,
+              endX: newEndX,
+              endY: newEndY,
+              scaleX: currentObject.scaleX || 1,
+              scaleY: currentObject.scaleY || 1,
+            });
+          }
         }
         redraw();
         return;
@@ -2535,6 +2578,66 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       setCurrentTool,
       redraw,
     ]);
+
+    // Add Escape key handler for Figma-like pen tool behavior
+    useEffect(() => {
+      const onKeyDown = (e: KeyboardEvent) => {
+        if ((currentTool as DrawingTool) === "pen") {
+          if (e.key === "Escape") {
+            if (isPenDrawing) {
+              setIsPenDrawing(false);
+            } else if (penAnchors.length > 0) {
+              setPenAnchors([]);
+              setCurrentTool("select");
+            }
+          }
+        }
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => {
+        window.removeEventListener("keydown", onKeyDown);
+      };
+    }, [currentTool, isPenDrawing, penAnchors, setCurrentTool]);
+
+    // Add effect to create open pen object if exiting pen mode with >=2 anchors and not closing the loop
+    useEffect(() => {
+      if (
+        (currentTool as DrawingTool) === "pen" &&
+        !isPenDrawing &&
+        penAnchors.length > 1
+      ) {
+        if (!ck) return;
+        const path = new ck.Path();
+        path.moveTo(penAnchors[0].x, penAnchors[0].y);
+        for (let i = 1; i < penAnchors.length; i++) {
+          path.lineTo(penAnchors[i].x, penAnchors[i].y);
+        }
+        const minX = Math.min(...penAnchors.map((p) => p.x));
+        const minY = Math.min(...penAnchors.map((p) => p.y));
+        const maxX = Math.max(...penAnchors.map((p) => p.x));
+        const maxY = Math.max(...penAnchors.map((p) => p.y));
+        const penObject = {
+          type: "pen" as const,
+          startX: minX,
+          startY: minY,
+          endX: maxX,
+          endY: maxY,
+          path,
+          fillColor: "transparent",
+          strokeColor: currentStrokeColor,
+          strokeWidth,
+          visible: true,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
+        };
+        if (onObjectCreated) onObjectCreated(penObject);
+        setPenAnchors([]);
+        setCurrentTool("select");
+      }
+      // Only run when pen mode is exited and anchors exist
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isPenDrawing]);
 
     return (
       <div className="skia-canvas-container" ref={containerRef}>
