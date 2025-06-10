@@ -38,6 +38,8 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
+import { toast } from "@/hooks/use-toast";
+import { Toaster } from "@/components/ui/toaster";
 
 interface PropertiesSidebarProps {
   selectedLayer: Layer | null;
@@ -104,6 +106,7 @@ export default function PropertiesSidebar({
   const [attachedImages, setAttachedImages] = React.useState<string[]>([]);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const popoverWrapperRef = React.useRef<HTMLDivElement>(null);
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
   // Calculate current aspect ratio
   const currentAspectRatio = dimensions.width / dimensions.height;
@@ -133,13 +136,29 @@ export default function PropertiesSidebar({
     const handlePaste = (e: ClipboardEvent) => {
       if (e.clipboardData) {
         const files: File[] = [];
+        const nonImages: string[] = [];
         for (let i = 0; i < e.clipboardData.items.length; i++) {
           const item = e.clipboardData.items[i];
-          if (item.type.startsWith("image/")) {
-            const file = item.getAsFile();
-            if (file) files.push(file);
+          if (item.kind === "file") {
+            if (item.type.startsWith("image/")) {
+              const file = item.getAsFile();
+              if (file) files.push(file);
+            } else {
+              const file = item.getAsFile();
+              if (file) nonImages.push(file.name);
+            }
           }
         }
+        if (nonImages.length > 0) {
+          setErrorMessage(
+            `Only image files are allowed. The following files are not images: ${nonImages.join(
+              ", "
+            )}`
+          );
+          e.preventDefault();
+          return;
+        }
+        setErrorMessage("");
         if (files.length > 0) {
           files.forEach((file) => {
             const reader = new FileReader();
@@ -161,6 +180,7 @@ export default function PropertiesSidebar({
 
   return (
     <aside className="w-72 border-l border-border bg-card flex flex-col">
+      <Toaster />
       <Tabs
         value={tab}
         onValueChange={setTab}
@@ -455,8 +475,25 @@ export default function PropertiesSidebar({
                   ]);
                   setChatInput("");
                   setAttachedImages([]);
+                  setErrorMessage("");
                 }}
               >
+                {errorMessage && (
+                  <div
+                    className="text-xs text-red-500 mb-1 font-medium flex items-center gap-2"
+                    data-testid="error-msg"
+                  >
+                    <span className="flex-1">{errorMessage}</span>
+                    <button
+                      type="button"
+                      aria-label="Close error message"
+                      className="ml-2 text-red-400 hover:text-red-600 focus:outline-none text-base font-bold px-1"
+                      onClick={() => setErrorMessage("")}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 {attachedImages.length > 0 && (
                   <div className="grid grid-cols-4 gap-x-2 gap-y-1 mb-1 w-full max-w-xs">
                     {attachedImages.slice(0, 6).map((img, idx) => (
@@ -623,9 +660,19 @@ export default function PropertiesSidebar({
                     className="hidden"
                     multiple
                     onChange={(e) => {
-                      const files = Array.from(e.target.files || []).filter(
-                        (file) => file.type.startsWith("image/")
+                      const files = Array.from(e.target.files || []);
+                      const nonImages = files.filter(
+                        (file) => !file.type.startsWith("image/")
                       );
+                      if (nonImages.length > 0) {
+                        setErrorMessage(
+                          `Only image files are allowed. The following files are not images: ${nonImages
+                            .map((f) => f.name)
+                            .join(", ")}`
+                        );
+                        return;
+                      }
+                      setErrorMessage("");
                       files.forEach((file) => {
                         const reader = new FileReader();
                         reader.onload = (ev) => {
@@ -637,6 +684,7 @@ export default function PropertiesSidebar({
                         reader.readAsDataURL(file);
                       });
                     }}
+                    onClick={() => setErrorMessage("")}
                   />
                   <div className="flex-1" />
                   <Button
