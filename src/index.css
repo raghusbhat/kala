@@ -60,3 +60,32 @@ body,
   width: 100%;
   height: 100%;
 }
+
+/* Custom scrollbar styles for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--accent));
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--accent) / 0.8);
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--accent)) hsl(var(--background));
+}
+
+textarea:focus {
+  border-color: hsl(var(--accent)) !important;
+  box-shadow: 0 0 0 1.5px hsl(var(--accent));
+  outline: none;
+}
