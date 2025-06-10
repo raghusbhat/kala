@@ -107,6 +107,7 @@ export default function PropertiesSidebar({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const popoverWrapperRef = React.useRef<HTMLDivElement>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [hoveredImageIdx, setHoveredImageIdx] = useState<number | null>(null);
 
   // Calculate current aspect ratio
   const currentAspectRatio = dimensions.width / dimensions.height;
@@ -496,32 +497,56 @@ export default function PropertiesSidebar({
                 )}
                 {attachedImages.length > 0 && (
                   <div className="grid grid-cols-4 gap-x-2 gap-y-1 mb-1 w-full max-w-xs">
-                    {attachedImages.slice(0, 6).map((img, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between bg-foreground/5 border border-white/5 rounded px-0.5 py-2 gap-2 w-14 h-6"
-                      >
-                        <img
-                          src={img}
-                          alt="attachment"
-                          className="w-5 h-5 rounded border border-foreground/5 object-cover"
-                        />
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-4 w-4 p-0 ml-1 hover:text-red-500 hover:bg-transparent"
-                          onClick={() =>
-                            setAttachedImages(
-                              attachedImages.filter((_, i) => i !== idx)
-                            )
-                          }
+                    {attachedImages.slice(0, 7).map((img, idx) => {
+                      // For a 4-column grid, last in row is idx % 4 === 3
+                      const isLastInRow = idx % 4 === 3;
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between bg-foreground/5 border border-white/5 rounded px-0.5 py-2 gap-2 w-14 h-6 relative"
+                          onMouseEnter={() => setHoveredImageIdx(idx)}
+                          onMouseLeave={() => setHoveredImageIdx(null)}
                         >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    ))}
-                    {attachedImages.length > 6 && (
+                          {/* Hover preview popup */}
+                          {hoveredImageIdx === idx && (
+                            <div
+                              className={`absolute z-50 bottom-full mb-2 p-1 bg-background border border-border rounded shadow-lg ${
+                                isLastInRow
+                                  ? "right-0"
+                                  : "left-1/2 -translate-x-1/2"
+                              }`}
+                              style={{ minWidth: 128, minHeight: 128 }}
+                            >
+                              <img
+                                src={img}
+                                alt="preview"
+                                className="w-32 h-32 object-contain rounded"
+                                style={{ pointerEvents: "none" }}
+                              />
+                            </div>
+                          )}
+                          <img
+                            src={img}
+                            alt="attachment"
+                            className="w-5 h-5 rounded border border-foreground/5 object-cover"
+                          />
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-4 w-4 p-0 ml-1 hover:text-red-500 hover:bg-transparent"
+                            onClick={() =>
+                              setAttachedImages(
+                                attachedImages.filter((_, i) => i !== idx)
+                              )
+                            }
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                    {attachedImages.length > 7 && (
                       <div
                         ref={popoverWrapperRef}
                         onMouseEnter={() => setPopoverOpen(true)}
@@ -534,7 +559,7 @@ export default function PropertiesSidebar({
                         >
                           <PopoverTrigger asChild>
                             <div className="flex items-center justify-center bg-foreground/5 border border-white/5 rounded px-0.5 py-2 w-14 h-6 text-xs text-muted-foreground font-medium cursor-pointer select-none">
-                              +{attachedImages.length - 6}
+                              +{attachedImages.length - 7}
                             </div>
                           </PopoverTrigger>
                           <PopoverContent
@@ -543,8 +568,8 @@ export default function PropertiesSidebar({
                             className="p-2 bg-background rounded shadow-lg border border-border w-48 min-w-[8rem]"
                           >
                             <ul className="flex flex-col gap-2">
-                              {attachedImages.slice(6).map((img, idx) => {
-                                let name = `Image ${idx + 7}`;
+                              {attachedImages.slice(7).map((img, idx) => {
+                                let name = `Image ${idx + 8}`;
                                 if (
                                   img.startsWith("data:") &&
                                   img.includes(";name=")
