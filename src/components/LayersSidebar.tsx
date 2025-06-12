@@ -4,6 +4,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { FiSearch } from "react-icons/fi";
 import Layer from "./Layer";
 import type { Layer as LayerType } from "../types";
+import { useLayerStore } from "../lib/useLayerStore";
+import { useCanvasStore } from "../lib/store";
 
 interface LayersSidebarProps {
   layers: LayerType[];
@@ -18,6 +20,44 @@ export default function LayersSidebar({
   onToggleLayerVisibility,
   onToggleLayerLock,
 }: LayersSidebarProps) {
+  const { setLayerParent } = useLayerStore();
+  const { objects, updateObject } = useCanvasStore();
+  const { updateLayerName } = useLayerStore();
+
+  const handleRename = (id: string, newName: string) => {
+    updateLayerName(id, newName);
+    // If this is a frame, update the canvas object name too
+    const objIdx = objects.findIndex((o) => o.id === id);
+    if (objIdx !== -1 && (objects[objIdx] as any).isFrame) {
+      updateObject(objIdx, { name: newName });
+    }
+  };
+
+  // Build hierarchical tree
+  const buildTree = (
+    parentId: string | undefined | null,
+    depth: number
+  ): JSX.Element[] => {
+    return layers
+      .filter((l) => (l.parentId || null) === (parentId || null))
+      .map((layer) => (
+        <div key={layer.id}>
+          <Layer
+            layer={layer}
+            depth={depth}
+            onSelect={onSelectLayer}
+            onToggleVisibility={onToggleLayerVisibility}
+            onToggleLock={onToggleLayerLock}
+            onDragLayer={(draggedId, targetId) =>
+              setLayerParent(draggedId, targetId)
+            }
+            onRename={handleRename}
+          />
+          {buildTree(layer.id, depth + 1)}
+        </div>
+      ));
+  };
+
   return (
     <aside className="w-56 border-r border-border bg-card flex flex-col">
       <div className="p-4 font-medium flex items-center justify-between">
@@ -33,15 +73,7 @@ export default function LayersSidebar({
       <ScrollArea className="flex-1">
         <div className="p-2">
           {layers.length > 0 ? (
-            layers.map((layer) => (
-              <Layer
-                key={layer.id}
-                layer={layer}
-                onSelect={onSelectLayer}
-                onToggleVisibility={onToggleLayerVisibility}
-                onToggleLock={onToggleLayerLock}
-              />
-            ))
+            buildTree(null, 0)
           ) : (
             <div className="p-4 text-xs text-muted-foreground text-center">
               No layers yet. Draw something using the tools above.

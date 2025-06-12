@@ -2,9 +2,10 @@
 export interface Layer {
   id: string;
   name: string;
-  type: "rectangle" | "ellipse" | "text";
+  type: "rectangle" | "ellipse" | "text" | "frame";
   visible: boolean;
   locked: boolean;
+  parentId?: string;
   selected?: boolean;
 }
 

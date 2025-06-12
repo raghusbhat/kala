@@ -32,6 +32,7 @@ import {
   drawFigmaHandle,
 } from "./skiaUtils";
 import { RefreshCw } from "lucide-react";
+import { useLayerStore } from "../../lib/useLayerStore";
 
 let canvasKitPromise: Promise<{ ck: CanvasKitType; fm: FontMgr }> | null = null;
 let canvasKitInstance: CanvasKitType | null = null;
@@ -45,7 +46,8 @@ export type DrawingTool =
   | "line"
   | "pencil"
   | "pen"
-  | "text";
+  | "text"
+  | "frame"; // Frame tool added
 
 enum HandlePosition {
   TopLeft = 0,
@@ -133,6 +135,12 @@ interface DrawingState {
   } | null;
   dragStartMouse: { x: number; y: number } | null;
   lastCursorAngle?: number;
+  // For frame dragging
+  dragFrameChildrenIndices?: number[] | null;
+  dragFrameChildrenOriginal?: Record<
+    number,
+    { startX: number; startY: number; endX: number; endY: number }
+  >; // original positions of children when dragging starts
 }
 
 const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
@@ -225,6 +233,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       isObjectDragging: false,
       dragStartObjectPosition: null,
       dragStartMouse: null,
+      // For frame dragging
+      dragFrameChildrenIndices: null,
+      dragFrameChildrenOriginal: {},
     });
 
     const [hoveredObjectIndex, setHoveredObjectIndex] = useState<number | null>(
@@ -245,6 +256,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
     // Add state for pen anchor edit mode
     const [penEditMode, setPenEditMode] = useState(false);
+
+    const { layers, setLayerParent } = useLayerStore();
 
     // Helper function to set cursor consistently
     const setCursor = useCallback(
@@ -531,24 +544,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         if (obj.strokeColor && obj.strokeColor !== "transparent") {
           const { r, g, b, a } = hexToRgba(obj.strokeColor);
           strokePaint.setColor(ck.Color4f(r, g, b, a));
-
-          // DEBUG: Log stroke color for selected object
-          if (index === selectedObjectIndex) {
-            console.log(`SELECTED OBJECT ${index} STROKE:`, {
-              strokeColor: obj.strokeColor,
-              strokeRGBA: { r, g, b, a },
-              strokeWidth: obj.strokeWidth,
-              objectType: obj.type,
-              fillColor: obj.fillColor,
-            });
-            if (strokePaint.getColor) {
-              const strokePaintColor = strokePaint.getColor();
-              console.log(
-                `SELECTED OBJECT ${index} strokePaint.getColor():`,
-                Array.from(strokePaintColor).join(",")
-              );
-            }
-          }
         } else {
           strokePaint.setColor(ck.Color4f(0, 0, 0, 0));
         }
@@ -877,6 +872,80 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         canvas.restore(); // Restore object local transform
         fillPaint.delete();
         strokePaint.delete();
+
+        /** Frame name tag rendering **/
+        if ((obj as any).isFrame && obj.name && fontMgr) {
+          // Calculate world-space top-left corner of the frame after all transforms
+          const topLeftWorld = getWorldCoordinatesOfHandle(
+            HandlePosition.TopLeft,
+            obj,
+            obj.rotation || 0,
+            obj.scaleX || 1,
+            obj.scaleY || 1
+          );
+
+          const labelFontSize = 12 / scale; // keep label size consistent across zoom levels
+          const paddingX = 4 / scale;
+          const paddingY = 2 / scale;
+
+          try {
+            const typeface = fontMgr.matchFamilyStyle("Roboto", {
+              weight: ck.FontWeight.Normal,
+              width: ck.FontWidth.Normal,
+              slant: ck.FontSlant.Upright,
+            });
+            if (typeface) {
+              const font = new ck.Font(typeface, labelFontSize);
+              const glyphIDs = font.getGlyphIDs(obj.name);
+              const glyphWidths = font.getGlyphWidths(glyphIDs);
+              const textWidth = glyphWidths.reduce((sum, w) => sum + w, 0);
+              const textHeight = labelFontSize; // approximate
+
+              const rectWidth = textWidth + paddingX * 2;
+              const rectHeight = textHeight + paddingY * 2;
+
+              const rect = ck.LTRBRect(
+                topLeftWorld.x,
+                topLeftWorld.y - 4 / scale - rectHeight,
+                topLeftWorld.x + rectWidth,
+                topLeftWorld.y - 4 / scale
+              );
+
+              // Background paint (dark grey pill)
+              const bgPaint = new ck.Paint();
+              bgPaint.setAntiAlias(true);
+              const { r: br, g: bg, b: bb, a: ba } = hexToRgba("#3C3C3C");
+              bgPaint.setColor(ck.Color4f(br, bg, bb, ba));
+              bgPaint.setStyle(ck.PaintStyle.Fill);
+
+              // Draw rounded rect background
+              canvas.drawRRect(ck.RRectXY(rect, 2 / scale, 2 / scale), bgPaint);
+
+              // Text paint (white)
+              const textPaint = new ck.Paint();
+              textPaint.setAntiAlias(true);
+              textPaint.setColor(ck.Color4f(1, 1, 1, 1));
+              textPaint.setStyle(ck.PaintStyle.Fill);
+
+              // Draw text baseline inside rect
+              const textX = topLeftWorld.x + paddingX;
+              const textY =
+                topLeftWorld.y -
+                4 / scale -
+                rectHeight +
+                paddingY +
+                textHeight * 0.8; // approximate baseline
+              canvas.drawText(obj.name, textX, textY, textPaint, font);
+
+              // Cleanup
+              font.delete();
+              bgPaint.delete();
+              textPaint.delete();
+            }
+          } catch (e) {
+            // Fail silently if font cannot be rendered
+          }
+        }
       });
 
       // 2. Draw Hover Highlight (if any, and not also selected)
@@ -1015,7 +1084,11 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
         const lfP = new ck.Paint();
         lfP.setAntiAlias(true);
-        const { r: fr, g: fg, b: fb, a: fa } = hexToRgba(currentColor);
+        let previewFill = currentColor;
+        if (currentTool === "frame") {
+          previewFill = "#3C3C3C";
+        }
+        const { r: fr, g: fg, b: fb, a: fa } = hexToRgba(previewFill);
         lfP.setColor(ck.Color4f(fr, fg, fb, fa));
         const lsP = new ck.Paint();
         lsP.setAntiAlias(true);
@@ -1027,6 +1100,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         const lrB = ck.LTRBRect(startX, startY, currentX, currentY);
         switch (currentTool) {
           case "rectangle":
+          case "frame":
             if (fa > 0.001) canvas.drawRect(lrB, lfP);
             if (sa > 0.001 && strokeWidth > 0) canvas.drawRect(lrB, lsP);
             break;
@@ -1573,6 +1647,58 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             setCurrentTool("select");
           }
           setHoveredObjectIndex(null);
+
+          // If the object is a frame (identified via isFrame flag), capture the children indices that are fully inside it so we can move them together
+          if ((objToDrag as any).isFrame) {
+            const draggedFrame = objToDrag as unknown as SkiaObjectDataForApp;
+            const frameBoundsMinX = Math.min(
+              draggedFrame.startX,
+              draggedFrame.endX
+            );
+            const frameBoundsMaxX = Math.max(
+              draggedFrame.startX,
+              draggedFrame.endX
+            );
+            const frameBoundsMinY = Math.min(
+              draggedFrame.startY,
+              draggedFrame.endY
+            );
+            const frameBoundsMaxY = Math.max(
+              draggedFrame.startY,
+              draggedFrame.endY
+            );
+            const childIndices: number[] = [];
+            storeObjects.forEach((o, idx) => {
+              if (idx === hitIndex) return; // skip the frame itself
+              const objMinX = Math.min(o.startX, o.endX);
+              const objMaxX = Math.max(o.startX, o.endX);
+              const objMinY = Math.min(o.startY, o.endY);
+              const objMaxY = Math.max(o.startY, o.endY);
+
+              const inside =
+                objMinX >= frameBoundsMinX &&
+                objMaxX <= frameBoundsMaxX &&
+                objMinY >= frameBoundsMinY &&
+                objMaxY <= frameBoundsMaxY;
+              if (inside) {
+                childIndices.push(idx);
+              }
+            });
+            state.dragFrameChildrenIndices = childIndices;
+            state.dragFrameChildrenOriginal = {};
+            childIndices.forEach((idx) => {
+              const c = storeObjects[idx];
+              (state.dragFrameChildrenOriginal as any)[idx] = {
+                startX: c.startX,
+                startY: c.startY,
+                endX: c.endX,
+                endY: c.endY,
+              };
+            });
+          } else {
+            state.dragFrameChildrenIndices = null;
+            state.dragFrameChildrenOriginal = {};
+          }
         } else {
           if (selectedObjectIndex !== null) {
             setSelectedObjectIndex(null);
@@ -1671,6 +1797,27 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               scaleY: currentObject.scaleY || 1,
             });
           }
+        }
+
+        // Propagate movement to children if the dragged object is a frame
+        const draggedObj = storeObjects[selectedObjectIndex];
+        if (
+          (draggedObj as any).isFrame &&
+          drawingStateRef.current.dragFrameChildrenIndices
+        ) {
+          drawingStateRef.current.dragFrameChildrenIndices.forEach(
+            (childIdx) => {
+              const orig =
+                drawingStateRef.current.dragFrameChildrenOriginal?.[childIdx];
+              if (!orig) return;
+              updateObject(childIdx, {
+                startX: orig.startX + dx,
+                startY: orig.startY + dy,
+                endX: orig.endX + dx,
+                endY: orig.endY + dy,
+              });
+            }
+          );
         }
         redraw();
         return;
@@ -1785,6 +1932,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
     };
 
     const handleMouseUp = () => {
+      console.log("handleMouseUp fired");
       if (showTextInput || textareaRef.current || !ck) return;
 
       const state = drawingStateRef.current;
@@ -1815,7 +1963,91 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         return;
       }
 
-      if (state.isObjectDragging) {
+      console.log("Checking drag end logic", {
+        isObjectDragging: state.isObjectDragging,
+        selectedObjectIndex,
+      });
+      if (state.isObjectDragging && selectedObjectIndex !== null) {
+        const movedObj = storeObjects[selectedObjectIndex];
+        if (movedObj && typeof movedObj.id === "string") {
+          const isFrame = (movedObj as any).isFrame;
+          function isDescendant(childId: string, ancestorId: string): boolean {
+            let current = layers.find((l) => l.id === childId);
+            while (current) {
+              if (current.parentId === ancestorId) return true;
+              if (!current.parentId) return false;
+              current = layers.find((l) => l.id === current.parentId);
+            }
+            return false;
+          }
+
+          // Get bounds of moved object
+          const objMinX = Math.min(movedObj.startX, movedObj.endX);
+          const objMaxX = Math.max(movedObj.startX, movedObj.endX);
+          const objMinY = Math.min(movedObj.startY, movedObj.endY);
+          const objMaxY = Math.max(movedObj.startY, movedObj.endY);
+          const tolerance = 0.5;
+
+          // Find all frames except self and descendants
+          const frames = layers.filter(
+            (l) =>
+              l.type === "frame" &&
+              l.id !== movedObj.id &&
+              !(isFrame && isDescendant(l.id, movedObj.id!))
+          );
+          // Find all frames that fully contain the object (with tolerance)
+          const containingFrames = frames.filter((frame) => {
+            const frameObj = storeObjects.find((o) => o.id === frame.id);
+            if (!frameObj) return false;
+            const frameMinX = Math.min(frameObj.startX, frameObj.endX);
+            const frameMaxX = Math.max(frameObj.startX, frameObj.endX);
+            const frameMinY = Math.min(frameObj.startY, frameObj.endY);
+            const frameMaxY = Math.max(frameObj.startY, frameObj.endY);
+            return (
+              objMinX >= frameMinX - tolerance &&
+              objMaxX <= frameMaxX + tolerance &&
+              objMinY >= frameMinY - tolerance &&
+              objMaxY <= frameMaxY + tolerance
+            );
+          });
+          // Find the deepest containing frame (descendant of all others)
+          let deepestFrameId: string | null = null;
+          for (const frame of containingFrames) {
+            let isDeepest = true;
+            for (const other of containingFrames) {
+              if (other.id !== frame.id && isDescendant(frame.id, other.id)) {
+                isDeepest = false;
+                break;
+              }
+            }
+            if (isDeepest) {
+              deepestFrameId = frame.id;
+              break;
+            }
+          }
+          if (state.dragStartObjectPosition) {
+            const orig = state.dragStartObjectPosition;
+            const movedDist =
+              Math.abs(movedObj.startX - orig.startX) +
+              Math.abs(movedObj.startY - orig.startY);
+            if (movedDist < 0.1) {
+              // Object was clicked but not moved; keep existing parentId
+            } else {
+              // perform nesting logic
+              if (deepestFrameId) {
+                setLayerParent(movedObj.id, deepestFrameId);
+              } else {
+                setLayerParent(movedObj.id, null);
+              }
+            }
+          } else {
+            if (deepestFrameId) {
+              setLayerParent(movedObj.id, deepestFrameId);
+            } else {
+              setLayerParent(movedObj.id, null);
+            }
+          }
+        }
         state.isObjectDragging = false;
         state.dragStartObjectPosition = null;
         state.dragStartMouse = null;
@@ -1829,7 +2061,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         let isClickToCreate = false;
 
         if (
-          currentTool === "rectangle" &&
+          (currentTool === "rectangle" || currentTool === "frame") &&
           state.startX === state.currentX &&
           state.startY === state.currentY
         ) {
@@ -1858,13 +2090,19 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           if (
             currentTool === "rectangle" ||
             currentTool === "ellipse" ||
-            currentTool === "line"
+            currentTool === "line" ||
+            currentTool === "frame"
           ) {
             completeObjectData = {
               ...baseObjectProperties,
-              type: currentTool,
+              type:
+                currentTool === "frame"
+                  ? ("rectangle" as const)
+                  : (currentTool as any),
               endX,
               endY,
+              isFrame: currentTool === "frame",
+              name: "Frame",
             } as SkiaObjectDataForApp;
           } else if (currentTool === "pen" && state.path) {
             const pathCopy = state.path.copy();
@@ -1886,19 +2124,69 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             ) {
               completeObjectData.fillColor = "transparent";
             }
+            if ((completeObjectData as any).isFrame) {
+              completeObjectData.fillColor = "#3C3C3C";
+              completeObjectData.strokeColor = currentStrokeColor;
+            }
             if (completeObjectData.type === "pen") {
               completeObjectData.strokeColor = currentStrokeColor;
             }
 
-            if (onObjectCreated) {
-              const layerId = onObjectCreated(completeObjectData);
-            } else {
-              const id = `${Date.now()}-${Math.random()}`;
-              const objWithId = { ...completeObjectData, id };
-              addObject(objWithId as any);
+            // Determine if this object is inside a frame and set parentFrameId BEFORE adding layer
+            const tolerance = 0.5;
+            for (let i = storeObjects.length - 1; i >= 0; i--) {
+              const candidate = storeObjects[i] as any;
+              if (candidate.isFrame && candidate.id) {
+                const frameMinX = Math.min(candidate.startX, candidate.endX);
+                const frameMaxX = Math.max(candidate.startX, candidate.endX);
+                const frameMinY = Math.min(candidate.startY, candidate.endY);
+                const frameMaxY = Math.max(candidate.startY, candidate.endY);
+
+                const objMinX = Math.min(
+                  completeObjectData.startX,
+                  completeObjectData.endX
+                );
+                const objMaxX = Math.max(
+                  completeObjectData.startX,
+                  completeObjectData.endX
+                );
+                const objMinY = Math.min(
+                  completeObjectData.startY,
+                  completeObjectData.endY
+                );
+                const objMaxY = Math.max(
+                  completeObjectData.startY,
+                  completeObjectData.endY
+                );
+
+                if (
+                  objMinX >= frameMinX - tolerance &&
+                  objMaxX <= frameMaxX + tolerance &&
+                  objMinY >= frameMinY - tolerance &&
+                  objMaxY <= frameMaxY + tolerance
+                ) {
+                  (completeObjectData as any).parentFrameId = candidate.id;
+                  break;
+                }
+              }
             }
-            setCurrentTool("select");
           }
+
+          // Add to application/store
+          if (onObjectCreated) {
+            onObjectCreated(completeObjectData as any);
+          } else {
+            const id = `${Date.now()}-${Math.random()}`;
+            const objWithId = { ...completeObjectData, id };
+            addObject(objWithId as any);
+          }
+
+          // Select the newly created object (last in array after add)
+          setTimeout(() => {
+            setSelectedObjectIndex(storeObjects.length);
+          }, 0);
+
+          setCurrentTool("select");
         }
 
         setIsDrawing(false);
@@ -1910,6 +2198,93 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           setCursor();
         }
         redraw();
+      }
+
+      if (state.isObjectDragging && selectedObjectIndex !== null) {
+        const movedObj = storeObjects[selectedObjectIndex];
+        if (!movedObj) return;
+
+        // Only check for non-frame objects
+        if (!(movedObj as any).isFrame) {
+          // Get bounds of moved object
+          const objMinX = Math.min(movedObj.startX, movedObj.endX);
+          const objMaxX = Math.max(movedObj.startX, movedObj.endX);
+          const objMinY = Math.min(movedObj.startY, movedObj.endY);
+          const objMaxY = Math.max(movedObj.startY, movedObj.endY);
+          const objArea = (objMaxX - objMinX) * (objMaxY - objMinY);
+
+          // Find all frames
+          const frames = layers.filter((l) => l.type === "frame");
+          let bestFrameId: string | null = null;
+          let bestIntersection = 0;
+
+          for (const frame of frames) {
+            // Find corresponding canvas object for frame
+            const frameObj = storeObjects.find((o) => o.id === frame.id);
+            if (!frameObj) continue;
+            const frameMinX = Math.min(frameObj.startX, frameObj.endX);
+            const frameMaxX = Math.max(frameObj.startX, frameObj.endX);
+            const frameMinY = Math.min(frameObj.startY, frameObj.endY);
+            const frameMaxY = Math.max(frameObj.startY, frameObj.endY);
+            // Calculate intersection
+            const ix = Math.max(
+              0,
+              Math.min(objMaxX, frameMaxX) - Math.max(objMinX, frameMinX)
+            );
+            const iy = Math.max(
+              0,
+              Math.min(objMaxY, frameMaxY) - Math.max(objMinY, frameMinY)
+            );
+            const intersectionArea = ix * iy;
+            if (intersectionArea > bestIntersection) {
+              bestIntersection = intersectionArea;
+              bestFrameId = frame.id;
+            }
+          }
+
+          const percentInBestFrame = bestIntersection / objArea;
+          const currentParentId =
+            layers.find((l) => l.id === movedObj.id)?.parentId || null;
+
+          if (typeof movedObj.id === "string") {
+            console.log("[NESTING CHECK]", {
+              objectId: movedObj.id,
+              currentParentId,
+              bestFrameId,
+              percentInBestFrame,
+            });
+            if (
+              bestFrameId &&
+              percentInBestFrame > 0.8 &&
+              bestFrameId !== currentParentId
+            ) {
+              console.log(
+                `[NESTING ACTION] Nesting object ${
+                  movedObj.id
+                } under frame ${bestFrameId} (${(
+                  percentInBestFrame * 100
+                ).toFixed(1)}% inside)`
+              );
+              setLayerParent(movedObj.id, bestFrameId!);
+            } else if (
+              (!bestFrameId || percentInBestFrame <= 0.8) &&
+              currentParentId
+            ) {
+              console.log(
+                `[NESTING ACTION] Un-nesting object ${
+                  movedObj.id
+                } from parent ${currentParentId} (only ${(
+                  percentInBestFrame * 100
+                ).toFixed(1)}% inside best frame)`
+              );
+              setLayerParent(movedObj.id, null);
+            } else {
+              console.log(
+                `[NESTING ACTION] No change for object ${movedObj.id}`
+              );
+            }
+          }
+        }
       }
     };
 
@@ -1943,7 +2318,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       requestAnimationFrame(redraw);
     };
 
-    const handleTextSubmit = (textValue: string) => {
+    function handleTextSubmit(textValue: string) {
       if (!ck || !textValue.trim() || !clickedPositionRef.current) return;
       const { x: worldX, y: worldY } = clickedPositionRef.current;
       const fontSize = 20;
@@ -1972,7 +2347,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         document.body.removeChild(textareaRef.current);
       }
       textareaRef.current = null;
-    };
+    }
 
     useEffect(() => {
       return () => {
@@ -2063,13 +2438,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         ) {
           const hover = hitTestHandles(x, y, state.handles);
           if (hover && !isSpacePressed) {
-            console.log("Setting cursor for hover:", hover.cursor);
-            console.log("Handle position:", hover.position);
-            console.log("Cursor URL:", hover.cursor);
             setCursor(hover.cursor);
             setHoveredHandle(hover); // Track the hovered handle
           } else {
-            console.log("Setting default cursor");
             setCursor();
             setHoveredHandle(null); // Clear hovered handle
           }

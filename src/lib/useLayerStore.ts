@@ -12,7 +12,10 @@ interface LayerState {
   appearance: Appearance;
 
   // Actions
-  addLayer: (type: "rectangle" | "ellipse" | "text") => string;
+  addLayer: (
+    type: "rectangle" | "ellipse" | "text" | "frame",
+    parentId?: string | null
+  ) => string;
   selectLayer: (id: string) => void;
   deleteLayer: (id: string) => void;
   toggleLayerVisibility: (id: string) => void;
@@ -43,6 +46,8 @@ interface LayerState {
       | "all",
     value: number | boolean
   ) => void;
+  setLayerParent: (childId: string, parentId: string | null) => void;
+  updateLayerName: (id: string, newName: string) => void;
 }
 
 export const useLayerStore = create<LayerState>((set) => ({
@@ -74,7 +79,7 @@ export const useLayerStore = create<LayerState>((set) => ({
   },
 
   // Actions
-  addLayer: (type) => {
+  addLayer: (type, parentId) => {
     const newId = `layer-${Date.now()}-${Math.round(Math.random() * 1000)}`;
 
     set((state) => {
@@ -90,6 +95,7 @@ export const useLayerStore = create<LayerState>((set) => ({
         visible: true,
         locked: false,
         selected: true,
+        parentId: parentId || undefined,
       };
 
       // Update properties based on type
@@ -104,6 +110,29 @@ export const useLayerStore = create<LayerState>((set) => ({
           fill: "#FFFFFF",
           stroke: "transparent",
           strokeWidth: 2,
+          shadow: {
+            enabled: false,
+            offsetX: 0,
+            offsetY: 4,
+            blur: 8,
+            spread: 0,
+            color: "#000000",
+          },
+          cornerRadius: {
+            topLeft: 0,
+            topRight: 0,
+            bottomLeft: 0,
+            bottomRight: 0,
+            independent: false,
+          },
+        };
+      } else if (type === "frame") {
+        newDimensions = { width: 400, height: 300 };
+        newPosition = { x: 150, y: 200, rotation: 0 };
+        newAppearance = {
+          fill: "#3C3C3C",
+          stroke: "#E5E7EB",
+          strokeWidth: 1,
           shadow: {
             enabled: false,
             offsetX: 0,
@@ -341,5 +370,21 @@ export const useLayerStore = create<LayerState>((set) => ({
         },
       };
     });
+  },
+
+  setLayerParent: (childId, parentId) => {
+    set((state) => ({
+      layers: state.layers.map((layer) =>
+        layer.id === childId ? { ...layer, parentId } : layer
+      ),
+    }));
+  },
+
+  updateLayerName: (id, newName) => {
+    set((state) => ({
+      layers: state.layers.map((layer) =>
+        layer.id === id ? { ...layer, name: newName } : layer
+      ),
+    }));
   },
 }));

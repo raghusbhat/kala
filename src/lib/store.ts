@@ -11,7 +11,8 @@ export type DrawingTool =
   | "line"
   | "pencil"
   | "pen"
-  | "text";
+  | "text"
+  | "frame";
 
 // Define object types
 export interface BaseObject {
@@ -28,6 +29,11 @@ export interface BaseObject {
   scaleX?: number;
   scaleY?: number;
   id?: string;
+  // Frame-related properties
+  isFrame?: boolean; // Marks this object as a frame (created using the Frame tool)
+  parentFrameId?: string; // If this object lives inside a frame, reference its parent frame's id
+  childrenIds?: string[]; // If this object is a frame, track ids of its child objects
+  name?: string;
   path?: Path;
   text?: string;
   fontSize?: number;
@@ -138,10 +144,13 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       // Ensure new objects have default visibility and stroke if not provided
       const objectWithDefaults = {
         ...object,
+        id:
+          object.id ||
+          `obj-${Date.now()}-${Math.round(Math.random() * 100000)}`,
         visible: object.visible !== undefined ? object.visible : true,
         strokeColor: object.strokeColor || "transparent",
         fillColor: object.fillColor || "#FFFFFF",
-      };
+      } as CanvasObject;
       // Type guard for text object
       if (objectWithDefaults.type === "text") {
         const textObj = objectWithDefaults as TextObject;

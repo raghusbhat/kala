@@ -17,6 +17,7 @@ import {
   FiMinus,
   FiPenTool,
 } from "react-icons/fi";
+import { Frame as FrameIcon } from "lucide-react";
 import SkiaCanvas, { DrawingTool } from "./SkiaCanvas/SkiaCanvas";
 import ToolButton from "./ui-custom/ToolButton";
 import FloatingToolbar from "./ui-custom/FloatingToolbar";
@@ -69,6 +70,13 @@ export default function CanvasArea({
               icon={FiMove}
               onClick={() => handleToolChange("select")}
               tooltip="Select Tool (V)"
+            />
+            <ToolButton
+              tool="frame"
+              currentTool={currentTool}
+              icon={FrameIcon as any}
+              onClick={() => handleToolChange("frame")}
+              tooltip="Frame Tool (F)"
             />
             <ToolButton
               tool="rectangle"

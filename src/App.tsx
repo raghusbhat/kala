@@ -109,9 +109,16 @@ function App() {
   // Function to handle object creation initiated from SkiaCanvas
   const handleSkiaObjectCreated = useCallback(
     (skiaData: SkiaObjectDataForApp) => {
+      // Pass parentFrameId as parentId if present
+      const parentId = (skiaData as any).parentFrameId || undefined;
       const layerId = addLayer(
-        skiaData.type as "rectangle" | "ellipse" | "text"
+        skiaData.isFrame ? ("frame" as const) : (skiaData.type as any),
+        parentId
       );
+
+      // Get layer name for use in canvas object
+      const { layers } = useLayerStore.getState();
+      const layerName = layers.find((l) => l.id === layerId)?.name || "";
 
       let fullCanvasObject: CanvasObject;
 
@@ -126,13 +133,11 @@ function App() {
       } else {
         fullCanvasObject = {
           ...skiaData,
-          type: skiaData.type as
-            | "rectangle"
-            | "ellipse"
-            | "line"
-            | "pen"
-            | "select",
+          type: skiaData.isFrame
+            ? ("rectangle" as const)
+            : (skiaData.type as any),
           id: layerId,
+          name: layerName,
         } as ShapeObject;
       }
 

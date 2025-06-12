@@ -316,7 +316,11 @@ export default function PropertiesSidebar({
                         <CornerRadiusControls
                           cornerRadius={appearance.cornerRadius}
                           onCornerRadiusChange={onCornerRadiusChange}
-                          objectType={selectedLayer.type}
+                          objectType={
+                            selectedLayer.type === "frame"
+                              ? "rectangle"
+                              : selectedLayer.type
+                          }
                         />
                       </div>
                     </PropertySection>
