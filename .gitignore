@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Misc folder
+misc/
+
+# Markdown files (except README.md)
+*.md
+!README.md
+
+# Text files
+*.txt
