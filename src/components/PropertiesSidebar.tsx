@@ -14,11 +14,11 @@ import PropertyInput from "./ui-custom/PropertyInput";
 import ColorInput from "./ui-custom/ColorInput";
 import ShadowControls from "./ui-custom/ShadowControls";
 import CornerRadiusControls from "./ui-custom/CornerRadiusControls";
+import ApiKeyInput from "./ui-custom/ApiKeyInput";
 import { useCanvasStore } from "../lib/store";
 import type { Layer, Position, Dimensions, Appearance } from "../types";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -26,12 +26,11 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import {
-  Paperclip,
-  ChevronDown,
   ChevronUp,
   Send,
   Image,
   X,
+  Loader2,
 } from "lucide-react";
 import {
   Popover,
@@ -40,6 +39,8 @@ import {
 } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
+import { useAI } from "../lib/ai/useAI";
+import type { ChatMessage } from "../lib/ai/useAI";
 
 interface PropertiesSidebarProps {
   selectedLayer: Layer | null;
@@ -90,24 +91,56 @@ export default function PropertiesSidebar({
     setCanvasBackgroundColor,
     aspectRatioLocked,
     setAspectRatioLocked,
+    objects: canvasObjects,
+    updateObject: updateCanvasObject,
   } = useCanvasStore();
+
+  // Derived: canvas object for the selected layer (for text font props)
+  const selectedCanvasObj = selectedLayer
+    ? canvasObjects.find((o) => o.id === selectedLayer.id) ?? null
+    : null;
+  const selectedTextObj =
+    selectedCanvasObj?.type === "text" ? selectedCanvasObj : null;
 
   const [tab, setTab] = React.useState("properties");
   const [chatInput, setChatInput] = React.useState("");
-  const [messages, setMessages] = React.useState([
+  const [messages, setMessages] = React.useState<ChatMessage[]>([
     {
       role: "ai",
       content:
-        "Hi! Ask me anything about the selected object or request a drawing.",
+        "Hi! I'm Kala. Ask me to create shapes, text, frames, or modify objects. Enter your API key below to get started.",
     },
   ]);
   const [selectedModel, setSelectedModel] = React.useState("Gemini");
+  const [apiKey, setApiKey] = useState<string>(
+    () => localStorage.getItem(`kala_api_key_Gemini`) ?? ""
+  );
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [attachedImages, setAttachedImages] = React.useState<string[]>([]);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const popoverWrapperRef = React.useRef<HTMLDivElement>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [hoveredImageIdx, setHoveredImageIdx] = useState<number | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { isLoading, send: sendToAI } = useAI();
+
+  // Persist API key per model
+  const handleApiKeyChange = (value: string) => {
+    setApiKey(value);
+    localStorage.setItem(`kala_api_key_${selectedModel}`, value);
+  };
+
+  // Load stored API key when model changes
+  useEffect(() => {
+    const stored = localStorage.getItem(`kala_api_key_${selectedModel}`) ?? "";
+    setApiKey(stored);
+  }, [selectedModel]);
+
+  // Auto-scroll to latest message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // Calculate current aspect ratio
   const currentAspectRatio = dimensions.width / dimensions.height;
@@ -311,48 +344,190 @@ export default function PropertiesSidebar({
                         </div>
                       </div>
 
-                      {/* Corner Radius Controls */}
-                      <div className="mt-4">
-                        <CornerRadiusControls
-                          cornerRadius={appearance.cornerRadius}
-                          onCornerRadiusChange={onCornerRadiusChange}
-                          objectType={
-                            selectedLayer.type === "frame"
-                              ? "rectangle"
-                              : selectedLayer.type
-                          }
-                        />
-                      </div>
-                    </PropertySection>
-
-                    {/* Appearance section */}
-                    <PropertySection title="Appearance">
-                      <ColorInput
-                        label="Fill"
-                        value={appearance.fill}
-                        onChange={(value) => onAppearanceChange("fill", value)}
-                      />
-
-                      <div className="mt-3">
-                        <ColorInput
-                          label="Stroke"
-                          value={appearance.stroke}
-                          onChange={(value) =>
-                            onAppearanceChange("stroke", value)
-                          }
-                        />
-                        <div className="mt-2">
-                          <PropertyInput
-                            label="W"
-                            value={appearance.strokeWidth}
-                            onChange={(value) =>
-                              onAppearanceChange("strokeWidth", value)
+                      {/* Corner Radius Controls — hide for text */}
+                      {selectedLayer.type !== "text" && (
+                        <div className="mt-4">
+                          <CornerRadiusControls
+                            cornerRadius={appearance.cornerRadius}
+                            onCornerRadiusChange={onCornerRadiusChange}
+                            objectType={
+                              selectedLayer.type === "frame"
+                                ? "rectangle"
+                                : selectedLayer.type
                             }
-                            type="number"
                           />
                         </div>
-                      </div>
+                      )}
                     </PropertySection>
+
+                    {/* Appearance section — hide fill/stroke for text (handled in Typography) */}
+                    {selectedLayer.type !== "text" && (
+                      <PropertySection title="Appearance">
+                        <ColorInput
+                          label="Fill"
+                          value={appearance.fill}
+                          onChange={(value) => onAppearanceChange("fill", value)}
+                        />
+
+                        <div className="mt-3">
+                          <ColorInput
+                            label="Stroke"
+                            value={appearance.stroke}
+                            onChange={(value) =>
+                              onAppearanceChange("stroke", value)
+                            }
+                          />
+                          <div className="mt-2">
+                            <PropertyInput
+                              label="W"
+                              value={appearance.strokeWidth}
+                              onChange={(value) =>
+                                onAppearanceChange("strokeWidth", value)
+                              }
+                              type="number"
+                            />
+                          </div>
+                        </div>
+                      </PropertySection>
+                    )}
+
+                    {/* Typography section — only for text layers */}
+                    {selectedLayer.type === "text" && selectedTextObj && (
+                      <PropertySection title="Typography">
+                        {/* Font Family */}
+                        <div className="space-y-2">
+                          <label className="text-xs text-muted-foreground">Font Family</label>
+                          <select
+                            value={(selectedTextObj as any).fontFamily || "Roboto"}
+                            onChange={(e) => {
+                              const idx = canvasObjects.findIndex(
+                                (o) => o.id === selectedLayer.id
+                              );
+                              if (idx !== -1)
+                                updateCanvasObject(idx, {
+                                  fontFamily: e.target.value,
+                                } as any);
+                            }}
+                            className="w-full text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground focus:outline-none focus:border-accent"
+                          >
+                            {[
+                              "Roboto",
+                              "Arial",
+                              "Helvetica",
+                              "Georgia",
+                              "Verdana",
+                              "Courier New",
+                              "Times New Roman",
+                            ].map((f) => (
+                              <option key={f} value={f}>
+                                {f}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Font Size & Weight */}
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <div>
+                            <label className="text-xs text-muted-foreground">Size</label>
+                            <input
+                              type="number"
+                              min={6}
+                              max={400}
+                              value={(selectedTextObj as any).fontSize || 20}
+                              onChange={(e) => {
+                                const newSize = Math.max(
+                                  6,
+                                  parseFloat(e.target.value) || 20
+                                );
+                                const idx = canvasObjects.findIndex(
+                                  (o) => o.id === selectedLayer.id
+                                );
+                                if (idx !== -1) {
+                                  const obj = canvasObjects[idx];
+                                  updateCanvasObject(idx, {
+                                    fontSize: newSize,
+                                    // Update endY so selection handles match the new size
+                                    endY: obj.startY + newSize * 1.4,
+                                  } as any);
+                                }
+                              }}
+                              className="w-full text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground focus:outline-none focus:border-accent mt-1"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground">Weight</label>
+                            <select
+                              value={(selectedTextObj as any).fontWeight || 400}
+                              onChange={(e) => {
+                                const idx = canvasObjects.findIndex(
+                                  (o) => o.id === selectedLayer.id
+                                );
+                                if (idx !== -1)
+                                  updateCanvasObject(idx, {
+                                    fontWeight: parseInt(e.target.value),
+                                  } as any);
+                              }}
+                              className="w-full text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground focus:outline-none focus:border-accent mt-1"
+                            >
+                              <option value={300}>Light 300</option>
+                              <option value={400}>Regular 400</option>
+                              <option value={500}>Medium 500</option>
+                              <option value={600}>SemiBold 600</option>
+                              <option value={700}>Bold 700</option>
+                              <option value={900}>Black 900</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Font Style */}
+                        <div className="mt-2">
+                          <label className="text-xs text-muted-foreground block mb-1">Style</label>
+                          <div className="flex gap-1">
+                            {(
+                              [
+                                { label: "I", value: "normal", title: "Normal" },
+                                { label: "I", value: "italic", title: "Italic" },
+                              ] as { label: string; value: string; title: string }[]
+                            ).map(({ label, value, title }) => {
+                              const current =
+                                (selectedTextObj as any).fontStyle || "normal";
+                              return (
+                                <button
+                                  key={value}
+                                  title={title}
+                                  onClick={() => {
+                                    const idx = canvasObjects.findIndex(
+                                      (o) => o.id === selectedLayer.id
+                                    );
+                                    if (idx !== -1)
+                                      updateCanvasObject(idx, {
+                                        fontStyle: value,
+                                      } as any);
+                                  }}
+                                  className={`flex-1 text-xs py-1 rounded border transition-colors ${
+                                    current === value
+                                      ? "bg-accent text-accent-foreground border-accent"
+                                      : "bg-background text-muted-foreground border-border hover:border-accent"
+                                  } ${value === "italic" ? "italic" : ""}`}
+                                >
+                                  {title}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Text Color (mirrors fill color for text) */}
+                        <div className="mt-2">
+                          <ColorInput
+                            label="Color"
+                            value={appearance.fill}
+                            onChange={(value) => onAppearanceChange("fill", value)}
+                          />
+                        </div>
+                      </PropertySection>
+                    )}
 
                     {/* Effects section */}
                     <PropertySection title="Effects">
@@ -446,11 +621,20 @@ export default function PropertiesSidebar({
         <TabsContent value="ai" className="flex flex-col flex-1 p-0">
           <TooltipProvider>
             <div className="flex flex-col flex-1 h-full">
-              <ScrollArea className="flex-1 px-3 py-4 space-y-3">
+              {/* API Key input */}
+              <div className="px-3 pt-3 pb-1">
+                <ApiKeyInput
+                  value={apiKey}
+                  onChange={handleApiKeyChange}
+                  label={`${selectedModel} API Key`}
+                  placeholder={`Enter your ${selectedModel} API key...`}
+                />
+              </div>
+              <ScrollArea className="flex-1 px-3 py-2 space-y-3">
                 {messages.map((msg, i) => (
                   <div
                     key={i}
-                    className={`flex w-full ${
+                    className={`flex w-full mb-2 ${
                       msg.role === "ai" ? "justify-start" : "justify-end"
                     }`}
                   >
@@ -464,23 +648,45 @@ export default function PropertiesSidebar({
                       style={{ wordBreak: "break-word" }}
                     >
                       {msg.content}
+                      {msg.isStreaming && (
+                        <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-muted-foreground rounded-sm animate-pulse" />
+                      )}
                     </div>
                   </div>
                 ))}
+                <div ref={messagesEndRef} />
               </ScrollArea>
               <form
                 className="relative z-10 flex flex-col gap-1 bg-[hsl(240,6%,16%)] shadow-2xl rounded-xl mx-2 mt-4 mb-4 p-3 border border-[hsl(240,6%,28%)] transition-all"
                 style={{ boxShadow: "0 4px 16px 0 rgba(30,30,40,0.55)" }}
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (isLoading) return;
                   if (!chatInput.trim() && attachedImages.length === 0) return;
-                  setMessages([
+
+                  const userText = chatInput.trim();
+                  const imagesCopy = [...attachedImages];
+                  const historyCopy = [...messages];
+
+                  // Append user message immediately
+                  const withUser: ChatMessage[] = [
                     ...messages,
-                    { role: "user", content: chatInput },
-                  ]);
+                    { role: "user", content: userText },
+                  ];
+                  setMessages(withUser);
                   setChatInput("");
                   setAttachedImages([]);
                   setErrorMessage("");
+
+                  // Send to AI (streaming bubble will be appended inside sendToAI)
+                  sendToAI(
+                    userText,
+                    imagesCopy,
+                    historyCopy,
+                    selectedModel,
+                    apiKey,
+                    (updater) => setMessages(updater)
+                  );
                 }}
               >
                 {errorMessage && (
@@ -611,9 +817,10 @@ export default function PropertiesSidebar({
                   <textarea
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Plan, search, build anything"
-                    className="w-full min-h-[48px] max-h-[180px] resize-none bg-background border border-border focus:border-accent focus:ring-1 focus:ring-accent rounded-lg pr-3 transition-all text-sm py-2 px-3"
+                    placeholder="Describe what to create or modify..."
+                    className="w-full min-h-[48px] max-h-[180px] resize-none bg-background border border-border focus:border-accent focus:ring-1 focus:ring-accent rounded-lg pr-3 transition-all text-sm py-2 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
                     autoFocus={tab === "ai"}
+                    disabled={isLoading}
                     style={{ overflowY: "auto" }}
                     ref={(el) => {
                       if (el) {
@@ -628,7 +835,7 @@ export default function PropertiesSidebar({
                         Math.min(input.scrollHeight, 180) + "px";
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
+                      if (e.key === "Enter" && !e.shiftKey && !isLoading) {
                         e.preventDefault();
                         e.currentTarget.form?.dispatchEvent(
                           new Event("submit", {
@@ -719,10 +926,14 @@ export default function PropertiesSidebar({
                   <Button
                     type="submit"
                     size="sm"
-                    disabled={!chatInput.trim() && attachedImages.length === 0}
+                    disabled={isLoading || (!chatInput.trim() && attachedImages.length === 0)}
                     className="h-8 w-8 bg-accent text-accent-foreground hover:bg-accent/90 rounded-md flex items-center justify-center ml-2 p-0"
                   >
-                    <Send className="w-4 h-4 mx-auto" />
+                    {isLoading ? (
+                      <Loader2 className="w-4 h-4 mx-auto animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4 mx-auto" />
+                    )}
                   </Button>
                 </div>
               </form>

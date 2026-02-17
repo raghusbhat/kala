@@ -20,7 +20,7 @@ import type {
 import CanvasKitInit from "canvaskit-wasm";
 import "./SkiaCanvas.css";
 import { useCanvasStore, type CanvasObject } from "../../lib/store";
-import { useTextTool } from "../../lib/useTextTool";
+import { TextRenderer, TextInputController } from "../../lib/text";
 import type { SkiaObjectDataForApp } from "../CanvasArea";
 import {
   hexToRgba,
@@ -141,6 +141,15 @@ interface DrawingState {
     number,
     { startX: number; startY: number; endX: number; endY: number }
   >; // original positions of children when dragging starts
+  // For text dragging while editing (ref-based to avoid stale closure)
+  isTextDragging: boolean;
+  textDragStartMouse: { x: number; y: number } | null; // screen coords at mousedown
+  textDragStartPosition: {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  } | null; // world coords of text at drag start
 }
 
 const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
@@ -151,14 +160,14 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    const {
-      textareaRef,
-      textToolActiveRef,
-      clickedPositionRef,
-      showTextInput,
-      setShowTextInput,
-      activateTextTool,
-    } = useTextTool();
+    // New text editing system
+    const textRendererRef = useRef<TextRenderer | null>(null);
+    const textControllerRef = useRef<TextInputController | null>(null);
+
+    // Stable redraw ref to prevent infinite loops
+    const redrawRef = useRef<() => void>(() => {});
+    const redrawScheduledRef = useRef<boolean>(false);
+    const lastRedrawTimeRef = useRef<number>(0);
 
     const {
       objects: storeObjects,
@@ -236,6 +245,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       // For frame dragging
       dragFrameChildrenIndices: null,
       dragFrameChildrenOriginal: {},
+      // For text dragging while editing
+      isTextDragging: false,
+      textDragStartMouse: null,
+      textDragStartPosition: null,
     });
 
     const [hoveredObjectIndex, setHoveredObjectIndex] = useState<number | null>(
@@ -314,7 +327,42 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
         const selectionOffset = 2; // Pixels to offset the selection rectangle outside the object
         canvas.save();
-        canvas.translate(center.x, center.y);
+
+        // If object is inside a rotated/scaled frame, apply parent frame transformation first
+        if ((obj as any).parentFrameId) {
+          const parentFrame = storeObjects.find(
+            (o: any) => o.id === (obj as any).parentFrameId
+          ) as any;
+          if (parentFrame && parentFrame.isFrame) {
+            const frameWidth = parentFrame.endX - parentFrame.startX;
+            const frameHeight = parentFrame.endY - parentFrame.startY;
+            const frameRot = parentFrame.rotation || 0;
+            const frameSX = parentFrame.scaleX || 1;
+            const frameSY = parentFrame.scaleY || 1;
+
+            // Apply frame transformation
+            canvas.translate(parentFrame.startX, parentFrame.startY);
+
+            if (frameRot !== 0 || frameSX !== 1 || frameSY !== 1) {
+              const localCenterX = frameWidth / 2;
+              const localCenterY = frameHeight / 2;
+              canvas.translate(localCenterX, localCenterY);
+              if (frameRot !== 0) canvas.rotate(frameRot, 0, 0);
+              if (frameSX !== 1 || frameSY !== 1) canvas.scale(frameSX, frameSY);
+              canvas.translate(-localCenterX, -localCenterY);
+            }
+
+            // Now translate to object center relative to frame
+            const objCenterX = center.x - parentFrame.startX;
+            const objCenterY = center.y - parentFrame.startY;
+            canvas.translate(objCenterX, objCenterY);
+          } else {
+            canvas.translate(center.x, center.y);
+          }
+        } else {
+          canvas.translate(center.x, center.y);
+        }
+
         canvas.rotate(rotation, 0, 0);
 
         canvas.drawRect(
@@ -450,10 +498,68 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             );
           }
 
-          // Update handle coordinates to be in canvas space
+          // Update handle coordinates to be in world space
           const rotatedPoint = rotatePoint(handle.x, handle.y, 0, 0, rotation);
-          handle.x = center.x + rotatedPoint.x;
-          handle.y = center.y + rotatedPoint.y;
+          let worldX = center.x + rotatedPoint.x;
+          let worldY = center.y + rotatedPoint.y;
+
+          // If object is inside a rotated/scaled frame, transform handle position through frame
+          if ((obj as any).parentFrameId) {
+            const parentFrame = storeObjects.find(
+              (o: any) => o.id === (obj as any).parentFrameId
+            ) as any;
+            if (parentFrame && parentFrame.isFrame) {
+              const frameWidth = parentFrame.endX - parentFrame.startX;
+              const frameHeight = parentFrame.endY - parentFrame.startY;
+              const frameRot = parentFrame.rotation || 0;
+              const frameSX = parentFrame.scaleX || 1;
+              const frameSY = parentFrame.scaleY || 1;
+
+              // Handle position relative to frame's top-left
+              let frameLocalX = worldX - parentFrame.startX;
+              let frameLocalY = worldY - parentFrame.startY;
+
+              // Apply frame transformation if needed
+              if (frameRot !== 0 || frameSX !== 1 || frameSY !== 1) {
+                const frameCenterX = frameWidth / 2;
+                const frameCenterY = frameHeight / 2;
+
+                // Translate to frame center
+                frameLocalX -= frameCenterX;
+                frameLocalY -= frameCenterY;
+
+                // Apply scale
+                if (frameSX !== 1 || frameSY !== 1) {
+                  frameLocalX *= frameSX;
+                  frameLocalY *= frameSY;
+                }
+
+                // Apply rotation
+                if (frameRot !== 0) {
+                  const rotated = rotatePoint(
+                    frameLocalX,
+                    frameLocalY,
+                    0,
+                    0,
+                    frameRot
+                  );
+                  frameLocalX = rotated.x;
+                  frameLocalY = rotated.y;
+                }
+
+                // Translate back from frame center
+                frameLocalX += frameCenterX;
+                frameLocalY += frameCenterY;
+              }
+
+              // Convert back to world coordinates
+              worldX = parentFrame.startX + frameLocalX;
+              worldY = parentFrame.startY + frameLocalY;
+            }
+          }
+
+          handle.x = worldX;
+          handle.y = worldY;
 
           // Update cursor based on handle position - but don't override rotation handle cursors
           if (handle.action !== "rotate") {
@@ -521,13 +627,28 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       canvas.scale(scale, scale);
 
       const renderedTextIds = new Set<string>();
+      const renderedObjects = new Set<number>(); // Track which objects have been rendered
       let activeSelectionHandles: Handle[] | undefined;
 
-      storeObjects.forEach((obj, index) => {
+      // Helper function to render a single object (without children)
+      // applyTransform: if false, assumes transform is already applied (e.g., by parent frame)
+      // coordinateOffset: { x, y } to offset coordinates (for children in frames)
+      const renderSingleObject = (
+        obj: any,
+        index: number,
+        applyTransform: boolean = true,
+        coordinateOffset: { x: number; y: number } = { x: 0, y: 0 }
+      ) => {
         if (obj.visible === false) return;
         if (obj.type === "text" && obj.id && renderedTextIds.has(obj.id))
           return;
         if (obj.type === "text" && obj.id) renderedTextIds.add(obj.id);
+
+        // Apply coordinate offset for children rendering inside frames
+        const startX = obj.startX - coordinateOffset.x;
+        const startY = obj.startY - coordinateOffset.y;
+        const endX = obj.endX - coordinateOffset.x;
+        const endY = obj.endY - coordinateOffset.y;
 
         const fillPaint = new ck.Paint();
         fillPaint.setAntiAlias(true);
@@ -551,25 +672,24 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         strokePaint.setStyle(ck.PaintStyle.Stroke);
 
         canvas.save(); // Object's local transform save
-        const objRot = obj.rotation || 0;
-        const objSX = obj.scaleX || 1;
-        const objSY = obj.scaleY || 1;
 
-        if (objRot !== 0 || objSX !== 1 || objSY !== 1) {
-          const cx = (obj.startX + obj.endX) / 2;
-          const cy = (obj.startY + obj.endY) / 2;
-          canvas.translate(cx, cy);
-          if (objRot !== 0) canvas.rotate(objRot, 0, 0);
-          if (objSX !== 1 || objSY !== 1) canvas.scale(objSX, objSY);
-          canvas.translate(-cx, -cy);
+        // Only apply transform if requested (not already applied by parent)
+        if (applyTransform) {
+          const objRot = obj.rotation || 0;
+          const objSX = obj.scaleX || 1;
+          const objSY = obj.scaleY || 1;
+
+          if (objRot !== 0 || objSX !== 1 || objSY !== 1) {
+            const cx = (startX + endX) / 2;
+            const cy = (startY + endY) / 2;
+            canvas.translate(cx, cy);
+            if (objRot !== 0) canvas.rotate(objRot, 0, 0);
+            if (objSX !== 1 || objSY !== 1) canvas.scale(objSX, objSY);
+            canvas.translate(-cx, -cy);
+          }
         }
 
-        const rectBounds = ck.LTRBRect(
-          obj.startX,
-          obj.startY,
-          obj.endX,
-          obj.endY
-        );
+        const rectBounds = ck.LTRBRect(startX, startY, endX, endY);
 
         // Draw shadow if enabled
         if (obj.shadowEnabled && obj.shadowBlur && obj.shadowBlur > 0) {
@@ -604,10 +724,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
           // Apply spread by expanding/contracting the bounds
           const shadowBounds = ck.LTRBRect(
-            obj.startX + shadowOffsetX - shadowSpread,
-            obj.startY + shadowOffsetY - shadowSpread,
-            obj.endX + shadowOffsetX + shadowSpread,
-            obj.endY + shadowOffsetY + shadowSpread
+            startX + shadowOffsetX - shadowSpread,
+            startY + shadowOffsetY - shadowSpread,
+            endX + shadowOffsetX + shadowSpread,
+            endY + shadowOffsetY + shadowSpread
           );
 
           // Draw shadow shape
@@ -627,8 +747,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                 const font = new ck.Font(typeface, obj.fontSize || 20);
                 canvas.drawText(
                   obj.text,
-                  obj.startX + shadowOffsetX,
-                  obj.startY + shadowOffsetY + (obj.fontSize || 20) * 0.75,
+                  startX + shadowOffsetX,
+                  startY + shadowOffsetY + (obj.fontSize || 20) * 0.75,
                   shadowPaint,
                   font
                 );
@@ -697,10 +817,10 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             } else {
               // Individual corner radii - create manual path
               const path = new ck.Path();
-              const left = obj.startX;
-              const top = obj.startY;
-              const right = obj.endX;
-              const bottom = obj.endY;
+              const left = startX;
+              const top = startY;
+              const right = endX;
+              const bottom = endY;
 
               // Start from top-left, going clockwise
               path.moveTo(left + topLeft, top);
@@ -798,29 +918,18 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           } = hexToRgba(obj.strokeColor || currentColor); // Use object's stroke or current
           strokePaint.setColor(ck.Color4f(sr, sg, sb, sa));
           canvas.drawPath(obj.path, strokePaint);
-        } else if (obj.type === "text" && obj.text && fontMgr) {
-          fillPaint.setStyle(ck.PaintStyle.Fill);
-          try {
-            const typeface = fontMgr.matchFamilyStyle("Roboto", {
-              weight: ck.FontWeight.Normal,
-              width: ck.FontWidth.Normal,
-              slant: ck.FontSlant.Upright,
-            });
-            if (!typeface) {
-              console.error("Roboto typeface not found");
-              return;
-            }
-            const font = new ck.Font(typeface, obj.fontSize || 20);
-            canvas.drawText(
-              obj.text,
-              obj.startX,
-              obj.startY + (obj.fontSize || 20) * 0.75,
-              fillPaint,
-              font
-            );
-            font.delete();
-          } catch (e) {
-            // Failed to load font - continue without text rendering
+        } else if (obj.type === "text") {
+          // Use new text rendering system
+          if (textRendererRef.current && fontMgr) {
+            // Apply coordinate offset to text object for proper rendering
+            const adjustedTextObj = {
+              ...obj,
+              startX,
+              startY,
+              endX,
+              endY
+            };
+            textRendererRef.current.render(canvas, ck, adjustedTextObj as any, fontMgr);
           }
         }
 
@@ -854,15 +963,34 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               const font = new ck.Font(typeface, fs);
               const glyphIDs = font.getGlyphIDs(obj.text);
               const glyphWidths = font.getGlyphWidths(glyphIDs);
-              const textWidth = glyphWidths.reduce((sum, w) => sum + w, 0);
-              font.delete();
-              const textHoverRect = ck.LTRBRect(
-                obj.startX - 2, // Padding
-                obj.startY - fs * 0.2 - 2, // Approx top relative to startY
-                obj.startX + textWidth + 2, // Approx right
-                obj.startY + fs * 0.8 + 2 // Approx bottom relative to startY
+              const fontForMeasure = new ck.Font(typeface, obj.fontSize || 20);
+              const unscaledGlyphIDs = fontForMeasure.getGlyphIDs(obj.text);
+              const unscaledGlyphWidths =
+                fontForMeasure.getGlyphWidths(unscaledGlyphIDs);
+              const unscaledTextWidth = unscaledGlyphWidths.reduce(
+                (sum, w) => sum + w,
+                0
               );
-              canvas.drawRect(textHoverRect, hoverPaint);
+              fontForMeasure.delete();
+              font.delete();
+
+              const scaledTextWidth = unscaledTextWidth * (obj.scaleX || 1);
+              const scaledTextHeight = (obj.fontSize || 20) * (obj.scaleY || 1);
+
+              const textRectLeft = startX;
+              const textRectTop = startY;
+              const textRectRight = startX + scaledTextWidth;
+              const textRectBottom = startY + scaledTextHeight;
+
+              canvas.drawRect(
+                ck.LTRBRect(
+                  textRectLeft - 2, // Padding
+                  textRectTop - fs * 0.2 - 2, // Approx top relative to startY
+                  textRectRight + 2, // Approx right
+                  textRectBottom + fs * 0.8 + 2 // Approx bottom relative to startY
+                ),
+                hoverPaint
+              );
             }
           }
           hoverPaint.delete();
@@ -945,6 +1073,109 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           } catch (e) {
             // Fail silently if font cannot be rendered
           }
+        }
+      };
+
+      // Recursive function to render an object and its children with proper transform inheritance
+      const renderObjectWithChildren = (
+        obj: any,
+        index: number,
+        coordinateOffset: { x: number; y: number } = { x: 0, y: 0 }
+      ) => {
+        // Skip if already rendered or invisible
+        if (renderedObjects.has(index) || obj.visible === false) return;
+
+        // Mark as rendered
+        renderedObjects.add(index);
+
+        // If this is a frame, apply clipping and render children in its coordinate space
+        if ((obj as any).isFrame) {
+          canvas.save(); // Save state before frame transform
+
+          const frameWidth = obj.endX - obj.startX;
+          const frameHeight = obj.endY - obj.startY;
+          const objRot = obj.rotation || 0;
+          const objSX = obj.scaleX || 1;
+          const objSY = obj.scaleY || 1;
+
+          // Step 1: Translate to frame's top-left corner (in absolute space)
+          canvas.translate(obj.startX, obj.startY);
+
+          // Step 2: Rotate around the frame's local center (relative to top-left)
+          if (objRot !== 0 || objSX !== 1 || objSY !== 1) {
+            const localCenterX = frameWidth / 2;
+            const localCenterY = frameHeight / 2;
+            canvas.translate(localCenterX, localCenterY);
+            if (objRot !== 0) canvas.rotate(objRot, 0, 0);
+            if (objSX !== 1 || objSY !== 1) canvas.scale(objSX, objSY);
+            canvas.translate(-localCenterX, -localCenterY);
+          }
+
+          // Step 3: Render the frame at (0, 0) relative to its own top-left
+          // Use coordinate offset instead of modifying the object
+          const tempStartX = obj.startX;
+          const tempStartY = obj.startY;
+          const tempEndX = obj.endX;
+          const tempEndY = obj.endY;
+          renderSingleObject(obj, index, false, { x: tempStartX, y: tempStartY });
+
+          // Step 4: Clip to frame bounds (relative to frame's top-left = 0,0)
+          const clipRect = ck.LTRBRect(0, 0, frameWidth, frameHeight);
+          canvas.clipRect(clipRect, ck.ClipOp.Intersect, true);
+
+          // Step 5: Render children with coordinates relative to frame origin
+          const childrenIds = (obj as any).childrenIds || [];
+
+          // Debug logging
+          if (childrenIds.length > 0) {
+            console.log('Frame rendering:', {
+              frameId: obj.id,
+              frameBounds: { startX: tempStartX, startY: tempStartY, endX: tempEndX, endY: tempEndY },
+              rotation: objRot,
+              childrenCount: childrenIds.length
+            });
+          }
+
+          childrenIds.forEach((childId: string) => {
+            const childIndex = storeObjects.findIndex((o: any) => o.id === childId);
+            if (childIndex !== -1) {
+              const child = storeObjects[childIndex];
+
+              console.log('Rendering child:', {
+                childId: child.id,
+                absolutePos: { startX: child.startX, startY: child.startY, endX: child.endX, endY: child.endY },
+                offset: { x: tempStartX, y: tempStartY },
+                relativePos: {
+                  startX: child.startX - tempStartX,
+                  startY: child.startY - tempStartY,
+                  endX: child.endX - tempStartX,
+                  endY: child.endY - tempStartY
+                }
+              });
+
+              // Render child with offset to make it relative to frame
+              // Pass the frame's top-left as the offset
+              renderObjectWithChildren(
+                child,
+                childIndex,
+                { x: tempStartX, y: tempStartY }
+              );
+            }
+          });
+
+          canvas.restore(); // Restore state after frame and children
+        } else {
+          // Not a frame, just render the object normally with the coordinate offset
+          renderSingleObject(obj, index, true, coordinateOffset);
+        }
+      };
+
+      // Main rendering loop - only render top-level objects (those without a parent)
+      storeObjects.forEach((obj: any, index: number) => {
+        // Only render objects that don't have a parent (top-level objects)
+        // Children will be rendered recursively by their parent frames
+        if (!obj.parentFrameId) {
+          renderObjectWithChildren(obj, index);
         }
       });
 
@@ -1192,14 +1423,61 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       isHoveringFirstAnchor,
     ]);
 
+    // Update redraw ref whenever redraw changes to keep it current
+    useEffect(() => {
+      redrawRef.current = redraw;
+    }, [redraw]);
+
+    // Stable callback that always calls the latest redraw
+    // Uses a flag to prevent multiple concurrent requestAnimationFrame calls
+    const stableRedrawCallback = useCallback(() => {
+      if (redrawScheduledRef.current) {
+        return; // Already scheduled, skip this call
+      }
+
+      redrawScheduledRef.current = true;
+      requestAnimationFrame((timestamp) => {
+        redrawScheduledRef.current = false;
+
+        // Rate limit: Skip if last redraw was less than 8ms ago (prevents rapid loops)
+        if (timestamp - lastRedrawTimeRef.current < 8) {
+          console.warn('[SkiaCanvas] Redraw skipped - too soon after last redraw');
+          return;
+        }
+
+        lastRedrawTimeRef.current = timestamp;
+        redrawRef.current();
+      });
+    }, []); // Empty deps - this callback never changes
+
+    // Clear pen tool state when switching away from pen tool
+    useEffect(() => {
+      if (currentTool !== "pen") {
+        setPenAnchors([]);
+        setIsPenDrawing(false);
+        setIsHoveringFirstAnchor(false);
+      }
+    }, [currentTool]);
+
+    // Track previous values to detect which dependency changed
+    const prevDepsRef = useRef({
+      ck: null as any,
+      fontMgr: null as any,
+      storeObjects: null as any,
+      offset: { x: 0, y: 0 },
+      scale: 1,
+      currentTool: '',
+      selectedObjectIndex: null as number | null,
+      isDragging: false,
+    });
+
     useLayoutEffect(() => {
       if (ck && drawingStateRef.current.canvas) {
-        redraw();
+        redrawRef.current();
       }
     }, [
       ck,
       fontMgr,
-      redraw,
       storeObjects,
       offset,
       scale,
@@ -1208,25 +1486,37 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       isDragging,
     ]);
 
+    // Initialize text editing system (only once on mount)
     useEffect(() => {
-      textToolActiveRef.current = currentTool === "text";
-      if (currentTool !== "text" && textareaRef.current) {
-        if (document.body.contains(textareaRef.current))
-          document.body.removeChild(textareaRef.current);
-        textareaRef.current = null;
-        setShowTextInput(false);
+      textRendererRef.current = new TextRenderer();
+      textControllerRef.current = new TextInputController(
+        stableRedrawCallback,
+        () => {
+          // Stop cursor blinking when editing stops
+          textRendererRef.current?.stopCursorBlinking();
+        }
+      );
+
+      return () => {
+        textRendererRef.current?.destroy();
+        textControllerRef.current?.destroy();
+        textRendererRef.current = null;
+        textControllerRef.current = null;
+      };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Empty deps - run only on mount/unmount
+
+    // Stop editing when switching away from text tool
+    useEffect(() => {
+      if (currentTool !== "text") {
+        textControllerRef.current?.stopEditing();
+        textRendererRef.current?.stopCursorBlinking();
       }
       // Reset space bar state when switching to text tool to avoid conflicts
       if (currentTool === "text" && isSpacePressed) {
         setIsSpacePressed(false);
       }
-    }, [
-      currentTool,
-      setShowTextInput,
-      textareaRef,
-      textToolActiveRef,
-      isSpacePressed,
-    ]);
+    }, [currentTool, isSpacePressed]);
 
     // Cleanup space bar state on unmount
     useEffect(() => {
@@ -1246,7 +1536,6 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           !e.altKey &&
           !e.ctrlKey &&
           !e.metaKey &&
-          !showTextInput &&
           !(document.activeElement instanceof HTMLInputElement) &&
           !(document.activeElement instanceof HTMLTextAreaElement) &&
           !(
@@ -1276,7 +1565,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         window.removeEventListener("keydown", handleKeyDown);
         window.removeEventListener("keyup", handleKeyUp);
       };
-    }, [setCursor, showTextInput]);
+    }, [setCursor]);
 
     useEffect(() => {
       if (canvasRef.current) {
@@ -1338,10 +1627,15 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
                     `https://unpkg.com/canvaskit-wasm@0.38.0/bin/${file}`,
                 });
               });
-              const fontData = await fetch(
-                "https://storage.googleapis.com/skia-cdn/misc/Roboto-Regular.ttf"
-              ).then((res) => res.arrayBuffer());
-              const loadedFM = loadedCK.FontMgr.FromData(fontData);
+              const fontResponse = await fetch("/Roboto-Regular.ttf");
+              if (!fontResponse.ok) {
+                throw new Error(`Failed to fetch font: ${fontResponse.status}`);
+              }
+              const fontData = await fontResponse.arrayBuffer();
+
+              // CanvasKit's FontMgr.FromData expects font data as Uint8Array
+              const fontBytes = new Uint8Array(fontData);
+              const loadedFM = loadedCK.FontMgr.FromData(fontBytes);
               if (!loadedFM) {
                 console.error("Font manager creation failed");
                 throw new Error("Font manager creation failed");
@@ -1426,7 +1720,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         ck.Color4f(bgColorInit.r, bgColorInit.g, bgColorInit.b, bgColorInit.a)
       );
       surface.flush();
-      redraw();
+      redrawRef.current();
 
       return () => {
         if (drawingStateRef.current.surface === surface) {
@@ -1435,22 +1729,16 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           drawingStateRef.current.canvas = null;
         }
       };
-    }, [ck, canvasSize, redraw]);
+    }, [ck, canvasSize, canvasBackgroundColor]);
 
     useLayoutEffect(() => {
       if (ck && drawingStateRef.current.canvas) {
-        redraw();
+        redrawRef.current();
       }
-    }, [ck, scale, offset, redraw]);
+    }, [ck, scale, offset]);
 
     const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (
-        showTextInput ||
-        textareaRef.current ||
-        !ck ||
-        !drawingStateRef.current.canvas
-      )
-        return;
+      if (!ck || !drawingStateRef.current.canvas) return;
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
       const mouseX = e.clientX - rect.left,
@@ -1468,7 +1756,112 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       }
 
       if (currentTool === "text") {
-        activateTextTool(mouseX, mouseY, worldX, worldY, handleTextSubmit);
+        // Check if there's an existing editing text object
+        const editingTextObj = useCanvasStore.getState().getEditingTextObject();
+        if (editingTextObj) {
+          // Measure actual text bounds for accurate hit detection
+          const fontSize = editingTextObj.fontSize || 20;
+          let textWidth = Math.max(editingTextObj.endX - editingTextObj.startX, 50);
+          if (editingTextObj.text && ck && fontMgr) {
+            const typeface = fontMgr.matchFamilyStyle(
+              editingTextObj.fontFamily || "Roboto",
+              {}
+            );
+            if (typeface) {
+              const font = new ck.Font(typeface, fontSize);
+              const glyphIDs = font.getGlyphIDs(editingTextObj.text);
+              const widths = font.getGlyphWidths(glyphIDs);
+              textWidth = Math.max(widths.reduce((s, w) => s + w, 0), 50);
+              font.delete();
+            }
+          }
+          // Add generous padding so edge-of-text clicks still register
+          const pad = 12;
+          const textBounds = {
+            left: editingTextObj.startX - pad,
+            top: editingTextObj.startY - fontSize * 0.3 - pad,
+            right: editingTextObj.startX + textWidth + pad,
+            bottom: editingTextObj.startY + fontSize * 1.2 + pad,
+          };
+
+          const isOutside =
+            worldX < textBounds.left ||
+            worldX > textBounds.right ||
+            worldY < textBounds.top ||
+            worldY > textBounds.bottom;
+
+          if (!isOutside) {
+            // Click inside existing text — start ref-based drag (no React state)
+            state.isTextDragging = true;
+            state.textDragStartMouse = { x: mouseX, y: mouseY };
+            state.textDragStartPosition = {
+              startX: editingTextObj.startX,
+              startY: editingTextObj.startY,
+              endX: editingTextObj.endX,
+              endY: editingTextObj.endY,
+            };
+            return;
+          }
+
+          // Click outside - stop editing and exit text tool (like Figma)
+          if (textControllerRef.current) {
+            textControllerRef.current.stopEditing();
+          }
+          if (textRendererRef.current) {
+            textRendererRef.current.stopCursorBlinking();
+          }
+
+          // Switch back to select tool
+          setCurrentTool("select");
+          return;
+        }
+
+        // Create new text object at clicked position
+        if (onObjectCreated) {
+          const newTextObj = {
+            type: "text" as const,
+            text: "",
+            fontSize: 20,
+            fontFamily: "Roboto",
+            fontWeight: 400,
+            fontStyle: "normal",
+            startX: worldX,
+            startY: worldY,
+            endX: worldX + 100, // Default width for empty text
+            endY: worldY + 24, // Approximate height for 20px font
+            fillColor: currentColor,
+            strokeColor: "transparent",
+            visible: true,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+            isEditing: false, // Start as non-editing, will be set to true by startEditing()
+            cursorPosition: 0,
+            selectionStart: null,
+            selectionEnd: null,
+          } as any;
+
+          const layerId = onObjectCreated(newTextObj);
+
+          // Select the newly created text object to show handles
+          setTimeout(() => {
+            setSelectedObjectIndex(storeObjects.length);
+          }, 0);
+
+          // Start editing immediately - Zustand updates are synchronous
+          if (textControllerRef.current && textRendererRef.current) {
+            // This will set isEditing: true
+            textControllerRef.current.startEditing(layerId, mouseX, mouseY, scale);
+
+            // Start cursor blinking AFTER editing is started
+            textRendererRef.current.stopCursorBlinking();
+            textRendererRef.current.startCursorBlinking(stableRedrawCallback);
+
+            // Trigger redraw to show bounding box immediately
+            stableRedrawCallback();
+          }
+        }
+
         return;
       }
 
@@ -1532,6 +1925,64 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const obj = storeObjects[i] as SkiaObjectDataForApp;
           if (obj.visible === false) continue;
 
+          // Transform mouse coordinates if object is inside a rotated frame
+          let transformedWorldX = worldX;
+          let transformedWorldY = worldY;
+
+          if ((obj as any).parentFrameId) {
+            const parentFrame = storeObjects.find(
+              (o: any) => o.id === (obj as any).parentFrameId
+            ) as any;
+            if (parentFrame && parentFrame.isFrame) {
+              const frameWidth = parentFrame.endX - parentFrame.startX;
+              const frameHeight = parentFrame.endY - parentFrame.startY;
+              const frameRot = parentFrame.rotation || 0;
+              const frameSX = parentFrame.scaleX || 1;
+              const frameSY = parentFrame.scaleY || 1;
+
+              // Step 1: Translate to frame's top-left origin
+              let frameLocalX = worldX - parentFrame.startX;
+              let frameLocalY = worldY - parentFrame.startY;
+
+              // Step 2: If frame is rotated/scaled, apply inverse transform around frame center
+              if (frameRot !== 0 || frameSX !== 1 || frameSY !== 1) {
+                const frameCenterX = frameWidth / 2;
+                const frameCenterY = frameHeight / 2;
+
+                // Translate to frame center
+                frameLocalX -= frameCenterX;
+                frameLocalY -= frameCenterY;
+
+                // Apply inverse scale
+                if (frameSX !== 1 || frameSY !== 1) {
+                  frameLocalX /= frameSX;
+                  frameLocalY /= frameSY;
+                }
+
+                // Apply inverse rotation
+                if (frameRot !== 0) {
+                  const rotated = rotatePoint(
+                    frameLocalX,
+                    frameLocalY,
+                    0,
+                    0,
+                    -frameRot
+                  );
+                  frameLocalX = rotated.x;
+                  frameLocalY = rotated.y;
+                }
+
+                // Translate back from frame center
+                frameLocalX += frameCenterX;
+                frameLocalY += frameCenterY;
+              }
+
+              // Convert back to world coordinates relative to frame's top-left
+              transformedWorldX = parentFrame.startX + frameLocalX;
+              transformedWorldY = parentFrame.startY + frameLocalY;
+            }
+          }
+
           const center = getObjectCenter(obj);
           const bounds = getObjectBounds(obj);
           const rot = obj.rotation || 0;
@@ -1539,8 +1990,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const sY = obj.scaleY || 1;
           let isHit = false;
 
-          let localMouseX = worldX - center.x;
-          let localMouseY = worldY - center.y;
+          let localMouseX = transformedWorldX - center.x;
+          let localMouseY = transformedWorldY - center.y;
 
           if (rot !== 0) {
             const p = rotatePoint(localMouseX, localMouseY, 0, 0, -rot);
@@ -1567,42 +2018,48 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               const normY = unscaledLocalMouseY / unscaledHalfHeight;
               isHit = normX * normX + normY * normY <= 1;
             }
-          } else if (obj.type === "text" && obj.text && ck && fontMgr) {
+          } else if (obj.type === "text") {
+            // Text hit test: use stored bounds ∪ measured glyph width, + padding.
+            // Works for empty text too (stored bounds fallback).
+            const fs = obj.fontSize || 20;
+            // Stored bounds give a minimum clickable area
+            const storedW = Math.max(Math.abs(obj.endX - obj.startX), 50);
+            const storedH = Math.max(Math.abs(obj.endY - obj.startY), fs * 1.4);
+            // Measure actual glyph width when text has content
+            let measuredW = storedW;
+            if (obj.text && ck && fontMgr) {
+              const typeface = fontMgr.matchFamilyStyle(
+                (obj as any).fontFamily || "Roboto",
+                {}
+              );
+              if (typeface) {
+                const font = new ck.Font(typeface, fs);
+                const glyphIDs = font.getGlyphIDs(obj.text);
+                const widths = font.getGlyphWidths(glyphIDs);
+                measuredW = Math.max(
+                  widths.reduce((s, w) => s + w, 0),
+                  storedW
+                );
+                font.delete();
+              }
+            }
+            // Add padding so clicking near (not just on) text registers
+            const PAD = 8;
             const tPt =
               rot !== 0
-                ? rotatePoint(worldX, worldY, center.x, center.y, -rot)
-                : { x: worldX, y: worldY };
-            const fs = obj.fontSize || 20;
-            const typeface = fontMgr.matchFamilyStyle("Roboto", {});
-            if (typeface) {
-              const font = new ck.Font(typeface, fs);
-              const glyphIDs = font.getGlyphIDs(obj.text);
-              const glyphWidths = font.getGlyphWidths(glyphIDs);
-              const fontForMeasure = new ck.Font(typeface, obj.fontSize || 20);
-              const unscaledGlyphIDs = fontForMeasure.getGlyphIDs(obj.text);
-              const unscaledGlyphWidths =
-                fontForMeasure.getGlyphWidths(unscaledGlyphIDs);
-              const unscaledTextWidth = unscaledGlyphWidths.reduce(
-                (sum, w) => sum + w,
-                0
-              );
-              fontForMeasure.delete();
-              font.delete();
-
-              const scaledTextWidth = unscaledTextWidth * sX;
-              const scaledTextHeight = (obj.fontSize || 20) * sY;
-
-              const textRectLeft = obj.startX;
-              const textRectTop = obj.startY;
-              const textRectRight = obj.startX + scaledTextWidth;
-              const textRectBottom = obj.startY + scaledTextHeight;
-
-              isHit =
-                tPt.x >= textRectLeft &&
-                tPt.x <= textRectRight &&
-                tPt.y >= textRectTop &&
-                tPt.y <= textRectBottom;
-            }
+                ? rotatePoint(
+                    transformedWorldX,
+                    transformedWorldY,
+                    center.x,
+                    center.y,
+                    -rot
+                  )
+                : { x: transformedWorldX, y: transformedWorldY };
+            isHit =
+              tPt.x >= obj.startX - PAD &&
+              tPt.x <= obj.startX + measuredW + PAD &&
+              tPt.y >= obj.startY - PAD &&
+              tPt.y <= obj.startY + storedH + PAD;
           }
 
           if (isHit) {
@@ -1650,51 +2107,49 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
           // If the object is a frame (identified via isFrame flag), capture the children indices that are fully inside it so we can move them together
           if ((objToDrag as any).isFrame) {
-            const draggedFrame = objToDrag as unknown as SkiaObjectDataForApp;
-            const frameBoundsMinX = Math.min(
-              draggedFrame.startX,
-              draggedFrame.endX
-            );
-            const frameBoundsMaxX = Math.max(
-              draggedFrame.startX,
-              draggedFrame.endX
-            );
-            const frameBoundsMinY = Math.min(
-              draggedFrame.startY,
-              draggedFrame.endY
-            );
-            const frameBoundsMaxY = Math.max(
-              draggedFrame.startY,
-              draggedFrame.endY
-            );
-            const childIndices: number[] = [];
-            storeObjects.forEach((o, idx) => {
-              if (idx === hitIndex) return; // skip the frame itself
-              const objMinX = Math.min(o.startX, o.endX);
-              const objMaxX = Math.max(o.startX, o.endX);
-              const objMinY = Math.min(o.startY, o.endY);
-              const objMaxY = Math.max(o.startY, o.endY);
+            const draggedFrameId = (objToDrag as any).id;
+            if (draggedFrameId) {
+              const childIndices: number[] = [];
 
-              const inside =
-                objMinX >= frameBoundsMinX &&
-                objMaxX <= frameBoundsMaxX &&
-                objMinY >= frameBoundsMinY &&
-                objMaxY <= frameBoundsMaxY;
-              if (inside) {
-                childIndices.push(idx);
-              }
-            });
-            state.dragFrameChildrenIndices = childIndices;
-            state.dragFrameChildrenOriginal = {};
-            childIndices.forEach((idx) => {
-              const c = storeObjects[idx];
-              (state.dragFrameChildrenOriginal as any)[idx] = {
-                startX: c.startX,
-                startY: c.startY,
-                endX: c.endX,
-                endY: c.endY,
+              const isDescendant = (candidateIdx: number): boolean => {
+                const visited = new Set<string>();
+                let current: any = storeObjects[candidateIdx];
+                while (current && (current as any).parentFrameId) {
+                  const pid = (current as any).parentFrameId as string;
+                  if (pid === draggedFrameId) return true;
+                  if (visited.has(pid)) break;
+                  visited.add(pid);
+                  const parentIdx = storeObjects.findIndex((o: any) => o.id === pid);
+                  if (parentIdx === -1) break;
+                  current = storeObjects[parentIdx];
+                }
+                return false;
               };
-            });
+
+              storeObjects.forEach((o, idx) => {
+                if (idx === hitIndex) return; // skip the frame itself
+                if (isDescendant(idx)) {
+                  childIndices.push(idx);
+                }
+              });
+
+              state.dragFrameChildrenIndices = childIndices;
+
+              // Capture original positions of each child for smooth dragging
+              state.dragFrameChildrenOriginal = {};
+              childIndices.forEach((idx) => {
+                const child = storeObjects[idx];
+                (state.dragFrameChildrenOriginal as any)[idx] = {
+                  startX: child.startX,
+                  startY: child.startY,
+                  endX: child.endX,
+                  endY: child.endY,
+                };
+              });
+            } else {
+              state.dragFrameChildrenIndices = [];
+              state.dragFrameChildrenOriginal = {};
+            }
           } else {
             state.dragFrameChildrenIndices = null;
             state.dragFrameChildrenOriginal = {};
@@ -1737,7 +2192,46 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         worldY = (mouseY - offset.y) / scale;
       const state = drawingStateRef.current;
 
+      // Text drag while editing — ref-based, no stale closure issues
+      if (state.isTextDragging && state.textDragStartMouse && state.textDragStartPosition) {
+        const editingTextObj = useCanvasStore.getState().getEditingTextObject();
+        if (editingTextObj) {
+          // Absolute delta from original mousedown position (screen → world)
+          const dx = (mouseX - state.textDragStartMouse.x) / scale;
+          const dy = (mouseY - state.textDragStartMouse.y) / scale;
+
+          const textObjIndex = useCanvasStore
+            .getState()
+            .objects.findIndex((obj) => obj.id === editingTextObj.id);
+          if (textObjIndex !== -1) {
+            const orig = state.textDragStartPosition;
+            updateObject(textObjIndex, {
+              startX: orig.startX + dx,
+              startY: orig.startY + dy,
+              endX: orig.endX + dx,
+              endY: orig.endY + dy,
+            });
+
+            // Keep hidden textarea aligned with the text
+            if (textControllerRef.current) {
+              const newScreenX = (orig.startX + dx) * scale + offset.x;
+              const newScreenY = (orig.startY + dy) * scale + offset.y;
+              textControllerRef.current.updateTextareaPosition(
+                newScreenX,
+                newScreenY,
+                scale,
+                editingTextObj.fontSize || 20
+              );
+            }
+          }
+
+          stableRedrawCallback();
+          return;
+        }
+      }
+
       if (isDragging) {
+        // Regular canvas panning
         setOffsetAction({
           x: offset.x + (mouseX - dragStart.x),
           y: offset.y + (mouseY - dragStart.y),
@@ -1833,6 +2327,64 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const obj = storeObjects[i] as SkiaObjectDataForApp;
           if (obj.visible === false) continue;
 
+          // Transform mouse coordinates if object is inside a rotated frame
+          let transformedWorldX = worldX;
+          let transformedWorldY = worldY;
+
+          if ((obj as any).parentFrameId) {
+            const parentFrame = storeObjects.find(
+              (o: any) => o.id === (obj as any).parentFrameId
+            ) as any;
+            if (parentFrame && parentFrame.isFrame) {
+              const frameWidth = parentFrame.endX - parentFrame.startX;
+              const frameHeight = parentFrame.endY - parentFrame.startY;
+              const frameRot = parentFrame.rotation || 0;
+              const frameSX = parentFrame.scaleX || 1;
+              const frameSY = parentFrame.scaleY || 1;
+
+              // Step 1: Translate to frame's top-left origin
+              let frameLocalX = worldX - parentFrame.startX;
+              let frameLocalY = worldY - parentFrame.startY;
+
+              // Step 2: If frame is rotated/scaled, apply inverse transform around frame center
+              if (frameRot !== 0 || frameSX !== 1 || frameSY !== 1) {
+                const frameCenterX = frameWidth / 2;
+                const frameCenterY = frameHeight / 2;
+
+                // Translate to frame center
+                frameLocalX -= frameCenterX;
+                frameLocalY -= frameCenterY;
+
+                // Apply inverse scale
+                if (frameSX !== 1 || frameSY !== 1) {
+                  frameLocalX /= frameSX;
+                  frameLocalY /= frameSY;
+                }
+
+                // Apply inverse rotation
+                if (frameRot !== 0) {
+                  const rotated = rotatePoint(
+                    frameLocalX,
+                    frameLocalY,
+                    0,
+                    0,
+                    -frameRot
+                  );
+                  frameLocalX = rotated.x;
+                  frameLocalY = rotated.y;
+                }
+
+                // Translate back from frame center
+                frameLocalX += frameCenterX;
+                frameLocalY += frameCenterY;
+              }
+
+              // Convert back to world coordinates relative to frame's top-left
+              transformedWorldX = parentFrame.startX + frameLocalX;
+              transformedWorldY = parentFrame.startY + frameLocalY;
+            }
+          }
+
           const center = getObjectCenter(obj);
           const bounds = getObjectBounds(obj);
           const rot = obj.rotation || 0;
@@ -1840,8 +2392,8 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const sY = obj.scaleY || 1;
           let isHit = false;
 
-          let localMouseX = worldX - center.x;
-          let localMouseY = worldY - center.y;
+          let localMouseX = transformedWorldX - center.x;
+          let localMouseY = transformedWorldY - center.y;
 
           if (rot !== 0) {
             const p = rotatePoint(localMouseX, localMouseY, 0, 0, -rot);
@@ -1868,42 +2420,44 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
               const normY = unscaledLocalMouseY / unscaledHalfHeight;
               isHit = normX * normX + normY * normY <= 1;
             }
-          } else if (obj.type === "text" && obj.text && ck && fontMgr) {
+          } else if (obj.type === "text") {
+            // Same robust hit test as mouseDown — stored bounds ∪ glyph width + padding
+            const fs = obj.fontSize || 20;
+            const storedW = Math.max(Math.abs(obj.endX - obj.startX), 50);
+            const storedH = Math.max(Math.abs(obj.endY - obj.startY), fs * 1.4);
+            let measuredW = storedW;
+            if (obj.text && ck && fontMgr) {
+              const typeface = fontMgr.matchFamilyStyle(
+                (obj as any).fontFamily || "Roboto",
+                {}
+              );
+              if (typeface) {
+                const font = new ck.Font(typeface, fs);
+                const glyphIDs = font.getGlyphIDs(obj.text);
+                const widths = font.getGlyphWidths(glyphIDs);
+                measuredW = Math.max(
+                  widths.reduce((s, w) => s + w, 0),
+                  storedW
+                );
+                font.delete();
+              }
+            }
+            const PAD = 8;
             const tPt =
               rot !== 0
-                ? rotatePoint(worldX, worldY, center.x, center.y, -rot)
-                : { x: worldX, y: worldY };
-            const fs = obj.fontSize || 20;
-            const typeface = fontMgr.matchFamilyStyle("Roboto", {});
-            if (typeface) {
-              const font = new ck.Font(typeface, fs);
-              const glyphIDs = font.getGlyphIDs(obj.text);
-              const glyphWidths = font.getGlyphWidths(glyphIDs);
-              const fontForMeasure = new ck.Font(typeface, obj.fontSize || 20);
-              const unscaledGlyphIDs = fontForMeasure.getGlyphIDs(obj.text);
-              const unscaledGlyphWidths =
-                fontForMeasure.getGlyphWidths(unscaledGlyphIDs);
-              const unscaledTextWidth = unscaledGlyphWidths.reduce(
-                (sum, w) => sum + w,
-                0
-              );
-              fontForMeasure.delete();
-              font.delete();
-
-              const scaledTextWidth = unscaledTextWidth * sX;
-              const scaledTextHeight = fs * sY;
-
-              const textRectLeft = obj.startX;
-              const textRectTop = obj.startY;
-              const textRectRight = obj.startX + scaledTextWidth;
-              const textRectBottom = obj.startY + scaledTextHeight;
-
-              isHit =
-                tPt.x >= textRectLeft &&
-                tPt.x <= textRectRight &&
-                tPt.y >= textRectTop &&
-                tPt.y <= textRectBottom;
-            }
+                ? rotatePoint(
+                    transformedWorldX,
+                    transformedWorldY,
+                    center.x,
+                    center.y,
+                    -rot
+                  )
+                : { x: transformedWorldX, y: transformedWorldY };
+            isHit =
+              tPt.x >= obj.startX - PAD &&
+              tPt.x <= obj.startX + measuredW + PAD &&
+              tPt.y >= obj.startY - PAD &&
+              tPt.y <= obj.startY + storedH + PAD;
           }
 
           if (isHit) {
@@ -1933,13 +2487,15 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
     const handleMouseUp = () => {
       console.log("handleMouseUp fired");
-      if (showTextInput || textareaRef.current || !ck) return;
+      if (!ck) return;
 
       const state = drawingStateRef.current;
 
       // Always reset drag state to prevent getting stuck
       const wasDragging = isDragging;
-      setIsDragging(false);
+      if (wasDragging) {
+        setIsDragging(false);
+      }
 
       // Also check and clear any active handle state as backup
       if (state.activeHandle) {
@@ -1951,6 +2507,13 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         setCursor();
         redraw();
         return;
+      }
+
+      // Always reset text drag state on mouse up
+      if (state.isTextDragging) {
+        state.isTextDragging = false;
+        state.textDragStartMouse = null;
+        state.textDragStartPosition = null;
       }
 
       if (currentTool === "text") {
@@ -1976,7 +2539,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             while (current) {
               if (current.parentId === ancestorId) return true;
               if (!current.parentId) return false;
-              current = layers.find((l) => l.id === current.parentId);
+              current = layers.find((l) => l.id === current!.parentId);
             }
             return false;
           }
@@ -2015,7 +2578,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           for (const frame of containingFrames) {
             let isDeepest = true;
             for (const other of containingFrames) {
-              if (other.id !== frame.id && isDescendant(frame.id, other.id)) {
+              if (other.id !== frame.id && isDescendant(other.id, frame.id)) {
                 isDeepest = false;
                 break;
               }
@@ -2127,6 +2690,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
             if ((completeObjectData as any).isFrame) {
               completeObjectData.fillColor = "#3C3C3C";
               completeObjectData.strokeColor = currentStrokeColor;
+              (completeObjectData as any).childrenIds = [];
             }
             if (completeObjectData.type === "pen") {
               completeObjectData.strokeColor = currentStrokeColor;
@@ -2318,53 +2882,13 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       requestAnimationFrame(redraw);
     };
 
-    function handleTextSubmit(textValue: string) {
-      if (!ck || !textValue.trim() || !clickedPositionRef.current) return;
-      const { x: worldX, y: worldY } = clickedPositionRef.current;
-      const fontSize = 20;
-      const textObjectData = {
-        type: "text",
-        startX: worldX,
-        startY: worldY,
-        endX: worldX,
-        endY: worldY + fontSize,
-        text: textValue,
-        fontSize,
-        fillColor: currentColor,
-        strokeColor: "transparent",
-        strokeWidth: 0,
-        visible: true,
-        rotation: 0,
-        scaleX: 1,
-        scaleY: 1,
-      } as SkiaObjectDataForApp;
-      if (onObjectCreated) {
-        const layerId = onObjectCreated(textObjectData);
-      }
-      setCurrentTool("none");
-      setShowTextInput(false);
-      if (textareaRef.current && document.body.contains(textareaRef.current)) {
-        document.body.removeChild(textareaRef.current);
-      }
-      textareaRef.current = null;
-    }
+    // Old text tool code removed - now using new TextRenderer system
 
     useEffect(() => {
       return () => {
         if (drawingStateRef.current.path) drawingStateRef.current.path.delete();
-        if (
-          textareaRef.current &&
-          document.body.contains(textareaRef.current)
-        ) {
-          try {
-            document.body.removeChild(textareaRef.current);
-          } catch (e) {
-            /*ignore*/
-          }
-          textareaRef.current = null;
-        }
       };
-    }, [textareaRef]);
+    }, []);
 
     useEffect(() => {
       const canvasEl = canvasRef.current;
@@ -2847,6 +3371,12 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
     const handleCanvasMouseLeave = useCallback(() => {
       const state = drawingStateRef.current;
+      // Always reset text drag on leave
+      if (state.isTextDragging) {
+        state.isTextDragging = false;
+        state.textDragStartMouse = null;
+        state.textDragStartPosition = null;
+      }
       if (currentTool === "select") {
         // Only clear hover and active handle states, but keep the selection
         state.activeHandle = null;
@@ -2858,6 +3388,7 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
 
     // 3. Add double-click handler to finish pen path
     const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      // 1. Handle pen tool double-click (finish path)
       if (
         (currentTool as DrawingTool) === "pen" &&
         isPenDrawing &&
@@ -2895,6 +3426,68 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
         setIsPenDrawing(false);
         setCurrentTool("select");
         redraw();
+        return; // Exit after handling pen tool
+      }
+
+      // 2. Handle double-click on text objects (enter edit mode like Figma)
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const worldX = (mouseX - offset.x) / scale;
+      const worldY = (mouseY - offset.y) / scale;
+
+      // Find if we clicked on a text object
+      for (let i = storeObjects.length - 1; i >= 0; i--) {
+        const obj = storeObjects[i];
+        if (obj.type === "text" && obj.visible) {
+          // Generous text bounds: stored bounds ∪ glyph measurement + padding
+          const fs = (obj as any).fontSize || 20;
+          const storedW = Math.max(Math.abs(obj.endX - obj.startX), 50);
+          const storedH = Math.max(Math.abs(obj.endY - obj.startY), fs * 1.4);
+          let measuredW = storedW;
+          if ((obj as any).text && ck && fontMgr) {
+            const typeface = fontMgr.matchFamilyStyle(
+              (obj as any).fontFamily || "Roboto",
+              {}
+            );
+            if (typeface) {
+              const font = new ck.Font(typeface, fs);
+              const glyphIDs = font.getGlyphIDs((obj as any).text);
+              const widths = font.getGlyphWidths(glyphIDs);
+              measuredW = Math.max(
+                widths.reduce((s: number, w: number) => s + w, 0),
+                storedW
+              );
+              font.delete();
+            }
+          }
+          const PAD = 8;
+          const inBounds =
+            worldX >= obj.startX - PAD &&
+            worldX <= obj.startX + measuredW + PAD &&
+            worldY >= obj.startY - PAD &&
+            worldY <= obj.startY + storedH + PAD;
+
+          if (inBounds) {
+            // Double-clicked on a text object - enter edit mode (Figma-like behavior)
+            // Switch to text tool
+            setCurrentTool("text");
+
+            // Select the text object to show handles
+            setSelectedObjectIndex(i);
+
+            // Start editing this text object
+            if (textControllerRef.current && textRendererRef.current && obj.id) {
+              textControllerRef.current.startEditing(obj.id, mouseX, mouseY, scale);
+              textRendererRef.current.stopCursorBlinking();
+              textRendererRef.current.startCursorBlinking(stableRedrawCallback);
+              stableRedrawCallback();
+            }
+            return; // Exit after handling text object
+          }
+        }
       }
     };
 

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Layer, Position, Dimensions, Appearance } from "../types";
+import { useCanvasStore } from "./store";
 
 interface LayerState {
   // Layers
@@ -48,6 +49,11 @@ interface LayerState {
   ) => void;
   setLayerParent: (childId: string, parentId: string | null) => void;
   updateLayerName: (id: string, newName: string) => void;
+  reorderLayers: (
+    draggedId: string,
+    targetId: string | null,
+    position: "above" | "below" | "inside"
+  ) => void;
 }
 
 export const useLayerStore = create<LayerState>((set) => ({
@@ -386,5 +392,95 @@ export const useLayerStore = create<LayerState>((set) => ({
         layer.id === id ? { ...layer, name: newName } : layer
       ),
     }));
+  },
+
+  reorderLayers: (draggedId, targetId, position) => {
+    set((state) => {
+      const layers: Layer[] = [...state.layers];
+      const draggedIndex = layers.findIndex((l) => l.id === draggedId);
+      if (draggedIndex === -1) return { layers: state.layers };
+
+      const prevParentId: string | null = layers[draggedIndex].parentId ?? null;
+
+      const draggedLayer: Layer = { ...layers[draggedIndex] };
+      layers.splice(draggedIndex, 1);
+
+      const isDescendant = (id: string, ancestorId: string): boolean => {
+        let cur: Layer | undefined = layers.find((l) => l.id === id);
+        // Walk up the tree
+        while (cur) {
+          if (cur.parentId === ancestorId) return true;
+          if (!cur.parentId) return false;
+          cur = layers.find((l) => l.id === cur!.parentId);
+        }
+        return false;
+      };
+
+      if (position === "inside" && targetId) {
+        // Nest inside target frame
+        draggedLayer.parentId = targetId;
+        const targetIdx = layers.findIndex((l) => l.id === targetId);
+        let insertIdx = targetIdx + 1;
+        // Insert after all existing descendants of target
+        for (let i = targetIdx + 1; i < layers.length; i++) {
+          if (isDescendant(layers[i].id, targetId)) {
+            insertIdx = i + 1;
+          } else {
+            break;
+          }
+        }
+        layers.splice(insertIdx, 0, draggedLayer);
+      } else if (targetId) {
+        const targetIdx = layers.findIndex((l) => l.id === targetId);
+        if (targetIdx === -1) return { layers: state.layers };
+
+        // Same parent as target
+        draggedLayer.parentId = layers[targetIdx].parentId ?? null;
+        const insertIdx = position === "above" ? targetIdx : targetIdx + 1;
+        layers.splice(insertIdx, 0, draggedLayer);
+      } else {
+        // Drop to root (no parent)
+        draggedLayer.parentId = null;
+        layers.push(draggedLayer);
+      }
+
+      // Sync with canvas store
+      const canvas = useCanvasStore.getState();
+      const objIdx = canvas.objects.findIndex((o) => o.id === draggedId);
+      if (objIdx !== -1) {
+        canvas.updateObject(objIdx, {
+          parentFrameId: draggedLayer.parentId ?? undefined,
+        } as any);
+      }
+
+      // Update childrenIds on frames
+      const updateFrameChildren = (
+        frameId: string | null,
+        childId: string,
+        add: boolean
+      ) => {
+        if (!frameId) return;
+        const frameIdx = canvas.objects.findIndex((o) => o.id === frameId);
+        if (frameIdx === -1) return;
+        const frameObj = canvas.objects[frameIdx] as any;
+        const currentChildren: string[] = frameObj.childrenIds || [];
+        let newChildren: string[];
+        if (add) {
+          if (!currentChildren.includes(childId))
+            newChildren = [...currentChildren, childId];
+          else newChildren = currentChildren;
+        } else {
+          newChildren = currentChildren.filter((id) => id !== childId);
+        }
+        canvas.updateObject(frameIdx, { childrenIds: newChildren } as any);
+      };
+
+      if (prevParentId !== draggedLayer.parentId) {
+        updateFrameChildren(prevParentId, draggedId, false);
+        updateFrameChildren(draggedLayer.parentId ?? null, draggedId, true);
+      }
+
+      return { layers };
+    });
   },
 }));

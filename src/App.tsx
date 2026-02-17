@@ -142,9 +142,24 @@ function App() {
       }
 
       addCanvasObject(fullCanvasObject);
+
+      // Update parent frame's childrenIds if this object has a parent
+      if (parentId) {
+        const parentIndex = canvasObjects.findIndex(obj => obj.id === parentId);
+        if (parentIndex !== -1) {
+          const parentObj = canvasObjects[parentIndex] as any;
+          const currentChildren = parentObj.childrenIds || [];
+          if (!currentChildren.includes(layerId)) {
+            updateCanvasObject(parentIndex, {
+              childrenIds: [...currentChildren, layerId]
+            } as any);
+          }
+        }
+      }
+
       return layerId;
     },
-    [addLayer, addCanvasObject]
+    [addLayer, addCanvasObject, canvasObjects, updateCanvasObject]
   );
 
   // Function to handle object selection from SkiaCanvas

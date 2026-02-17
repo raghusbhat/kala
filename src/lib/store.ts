@@ -61,6 +61,14 @@ export interface TextObject extends BaseObject {
   id: string;
   text: string;
   fontSize: number;
+  fontFamily?: string;
+  fontWeight?: number;
+  fontStyle?: 'normal' | 'italic';
+  // Editing state (transient, not persisted)
+  isEditing?: boolean;
+  cursorPosition?: number;
+  selectionStart?: number | null;
+  selectionEnd?: number | null;
 }
 
 export type CanvasObject =
@@ -111,10 +119,20 @@ interface CanvasState {
   setStrokeColor: (color: string) => void;
   setStrokeWidth: (width: number) => void;
   toggleObjectVisibility: (index: number) => void;
+
+  // Text editing
+  editingTextId: string | null;
+  startTextEditing: (id: string) => void;
+  stopTextEditing: () => void;
+  updateTextContent: (id: string, text: string) => void;
+  updateTextCursor: (id: string, position: number) => void;
+  updateTextSelection: (id: string, start: number | null, end: number | null) => void;
+  getTextObjectById: (id: string) => TextObject | undefined;
+  getEditingTextObject: () => TextObject | null;
 }
 
 // Create the store
-export const useCanvasStore = create<CanvasState>((set) => ({
+export const useCanvasStore = create<CanvasState>((set, get) => ({
   // Tools
   currentTool: "none",
   setCurrentTool: (tool) => set({ currentTool: tool }),
@@ -173,7 +191,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   updateObject: (index, object) =>
     set((state) => {
       const newObjects = [...state.objects];
-      newObjects[index] = { ...newObjects[index], ...object };
+      newObjects[index] = { ...newObjects[index], ...object } as CanvasObject;
       return { objects: newObjects };
     }),
   removeObject: (index) =>
@@ -213,6 +231,117 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       }
       return { objects: newObjects };
     }),
+
+  // Text editing
+  editingTextId: null,
+
+  startTextEditing: (id) =>
+    set((state) => {
+      const newObjects = [...state.objects];
+      const objIndex = newObjects.findIndex((o) => o.id === id);
+
+      if (objIndex >= 0 && newObjects[objIndex].type === "text") {
+        newObjects[objIndex] = {
+          ...newObjects[objIndex],
+          isEditing: true,
+          cursorPosition: (newObjects[objIndex] as TextObject).text.length,
+          selectionStart: null,
+          selectionEnd: null,
+        } as CanvasObject;
+      }
+
+      return { editingTextId: id, objects: newObjects };
+    }),
+
+  stopTextEditing: () =>
+    set((state) => {
+      if (!state.editingTextId) return state;
+
+      const newObjects = [...state.objects];
+      const objIndex = newObjects.findIndex((o) => o.id === state.editingTextId);
+
+      if (objIndex >= 0 && newObjects[objIndex].type === "text") {
+        newObjects[objIndex] = {
+          ...newObjects[objIndex],
+          isEditing: false,
+          cursorPosition: 0,
+          selectionStart: null,
+          selectionEnd: null,
+        } as CanvasObject;
+      }
+
+      return { editingTextId: null, objects: newObjects };
+    }),
+
+  updateTextContent: (id, text) =>
+    set((state) => {
+      const newObjects = [...state.objects];
+      const objIndex = newObjects.findIndex((o) => o.id === id);
+
+      if (objIndex >= 0 && newObjects[objIndex].type === "text") {
+        const obj = newObjects[objIndex] as TextObject;
+        const fontSize = obj.fontSize || 20;
+        // Approximate endX so selection handles track typed text.
+        // Real measurement happens in the canvas hit test; this is a best-effort estimate.
+        const estimatedWidth = Math.max(text.length * fontSize * 0.55, 50);
+        const estimatedHeight = fontSize * 1.4;
+        newObjects[objIndex] = {
+          ...obj,
+          text,
+          endX: obj.startX + estimatedWidth,
+          endY: obj.startY + estimatedHeight,
+        } as CanvasObject;
+      }
+
+      return { objects: newObjects };
+    }),
+
+  updateTextCursor: (id, position) =>
+    set((state) => {
+      const newObjects = [...state.objects];
+      const objIndex = newObjects.findIndex((o) => o.id === id);
+
+      if (objIndex >= 0 && newObjects[objIndex].type === "text") {
+        const textObj = newObjects[objIndex] as TextObject;
+        const clampedPosition = Math.max(0, Math.min(position, textObj.text.length));
+
+        newObjects[objIndex] = {
+          ...newObjects[objIndex],
+          cursorPosition: clampedPosition,
+        } as CanvasObject;
+      }
+
+      return { objects: newObjects };
+    }),
+
+  updateTextSelection: (id, start, end) =>
+    set((state) => {
+      const newObjects = [...state.objects];
+      const objIndex = newObjects.findIndex((o) => o.id === id);
+
+      if (objIndex >= 0 && newObjects[objIndex].type === "text") {
+        newObjects[objIndex] = {
+          ...newObjects[objIndex],
+          selectionStart: start,
+          selectionEnd: end,
+        } as CanvasObject;
+      }
+
+      return { objects: newObjects };
+    }),
+
+  getTextObjectById: (id: string) => {
+    const state = get();
+    const obj = state.objects.find((o) => o.id === id);
+    return obj?.type === "text" ? (obj as TextObject) : undefined;
+  },
+
+  getEditingTextObject: () => {
+    const state = get();
+    if (!state.editingTextId) return null;
+    const obj = state.objects.find((o) => o.id === state.editingTextId);
+    return obj?.type === "text" ? (obj as TextObject) : null;
+  },
 }));
 
 // Utility function to get the path data for a pen object

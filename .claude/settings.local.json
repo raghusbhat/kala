@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:help.figma.com)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "mcp__puppeteer__puppeteer_navigate",
+      "mcp__puppeteer__puppeteer_screenshot",
+      "mcp__puppeteer__puppeteer_click",
+      "mcp__puppeteer__puppeteer_evaluate",
+      "WebFetch(domain:skia.org)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl:*)",
+      "Bash(awk:*)",
+      "Bash(echo:*)",
+      "WebFetch(domain:app.unpkg.com)",
+      "WebFetch(domain:www.figma.com)",
+      "Bash(taskkill:*)",
+      "WebFetch(domain:dspy.ai)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

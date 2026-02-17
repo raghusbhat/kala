@@ -1,3 +1,4 @@
+import React, { useState, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -20,9 +21,8 @@ export default function LayersSidebar({
   onToggleLayerVisibility,
   onToggleLayerLock,
 }: LayersSidebarProps) {
-  const { setLayerParent } = useLayerStore();
+  const { reorderLayers, updateLayerName } = useLayerStore();
   const { objects, updateObject } = useCanvasStore();
-  const { updateLayerName } = useLayerStore();
 
   const handleRename = (id: string, newName: string) => {
     updateLayerName(id, newName);
@@ -33,29 +33,46 @@ export default function LayersSidebar({
     }
   };
 
+  // Track collapsed state per layer id
+  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
+
+  const toggleCollapse = useCallback((id: string) => {
+    setCollapsedMap((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
   // Build hierarchical tree
   const buildTree = (
     parentId: string | undefined | null,
     depth: number
-  ): JSX.Element[] => {
+  ): React.ReactElement[] => {
     return layers
       .filter((l) => (l.parentId || null) === (parentId || null))
-      .map((layer) => (
-        <div key={layer.id}>
-          <Layer
-            layer={layer}
-            depth={depth}
-            onSelect={onSelectLayer}
-            onToggleVisibility={onToggleLayerVisibility}
-            onToggleLock={onToggleLayerLock}
-            onDragLayer={(draggedId, targetId) =>
-              setLayerParent(draggedId, targetId)
-            }
-            onRename={handleRename}
-          />
-          {buildTree(layer.id, depth + 1)}
-        </div>
-      ));
+      .map((layer) => {
+        const children = layers.filter((c) => (c.parentId || null) === layer.id);
+        const hasChildren = children.length > 0;
+        const isCollapsed = collapsedMap[layer.id] ?? false;
+
+        return (
+          <div key={layer.id}>
+            <Layer
+              layer={layer}
+              depth={depth}
+              onSelect={onSelectLayer}
+              onToggleVisibility={onToggleLayerVisibility}
+              onToggleLock={onToggleLayerLock}
+              onDragLayer={(draggedId, targetId, position) =>
+                reorderLayers(draggedId, targetId, position)
+              }
+              onRename={handleRename}
+              hasChildren={hasChildren}
+              collapsed={isCollapsed}
+              toggleCollapse={() => toggleCollapse(layer.id)}
+            />
+            {/* Render children only if not collapsed */}
+            {!isCollapsed && buildTree(layer.id, depth + 1)}
+          </div>
+        );
+      });
   };
 
   return (
@@ -70,8 +87,8 @@ export default function LayersSidebar({
         </div>
       </div>
       <Separator />
-      <ScrollArea className="flex-1">
-        <div className="p-2">
+      <ScrollArea className="flex-1 overflow-y-auto overflow-x-auto">
+        <div className="p-2 select-none min-w-full">
           {layers.length > 0 ? (
             buildTree(null, 0)
           ) : (

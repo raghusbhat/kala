@@ -5,7 +5,7 @@ export interface Layer {
   type: "rectangle" | "ellipse" | "text" | "frame";
   visible: boolean;
   locked: boolean;
-  parentId?: string;
+  parentId?: string | null;
   selected?: boolean;
 }
 

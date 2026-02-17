@@ -59,9 +59,19 @@ export const getObjectBounds = (obj: {
   endX: number;
   startY: number;
   endY: number;
+  type?: string;
+  fontSize?: number;
 }) => {
-  const width = Math.abs(obj.endX - obj.startX);
-  const height = Math.abs(obj.endY - obj.startY);
+  let width = Math.abs(obj.endX - obj.startX);
+  let height = Math.abs(obj.endY - obj.startY);
+
+  // For text objects, ensure minimum bounds to prevent zero-width issues
+  if (obj.type === 'text') {
+    const fontSize = obj.fontSize || 20;
+    width = Math.max(width, 50); // Minimum width of 50px
+    height = Math.max(height, fontSize * 1.2); // Minimum height based on font size
+  }
+
   return { width, height };
 };
 
