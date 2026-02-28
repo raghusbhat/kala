@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Local env files
+*.local
+.env
+.env.*
+
+# TypeScript cache
+tsconfig.app.tsbuildinfo

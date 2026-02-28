@@ -20,7 +20,8 @@
       "WebFetch(domain:dspy.ai)",
       "Bash(npx tsc:*)",
       "Bash(git remote set-url:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(mv:*)"
     ]
   }
 }
