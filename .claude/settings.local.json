@@ -18,7 +18,9 @@
       "WebFetch(domain:www.figma.com)",
       "Bash(taskkill:*)",
       "WebFetch(domain:dspy.ai)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(git pull:*)"
     ]
   }
 }

@@ -1423,10 +1423,9 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
       isHoveringFirstAnchor,
     ]);
 
-    // Update redraw ref whenever redraw changes to keep it current
-    useEffect(() => {
-      redrawRef.current = redraw;
-    }, [redraw]);
+    // Always keep redrawRef current — synchronous assignment ensures useLayoutEffect
+    // (which runs before useEffect) calls the latest redraw with up-to-date storeObjects.
+    redrawRef.current = redraw;
 
     // Stable callback that always calls the latest redraw
     // Uses a flag to prevent multiple concurrent requestAnimationFrame calls
@@ -3230,14 +3229,29 @@ const SkiaCanvas = forwardRef<SkiaCanvasRefType, SkiaCanvasProps>(
           const centerOffsetX = newWorldCenterX - originalObjCenter.x;
           const centerOffsetY = newWorldCenterY - originalObjCenter.y;
 
-          updateObject(selectedIdx, {
-            startX: originalObj.startX + centerOffsetX,
-            startY: originalObj.startY + centerOffsetY,
-            endX: originalObj.endX + centerOffsetX,
-            endY: originalObj.endY + centerOffsetY,
-            scaleX: newScaleX,
-            scaleY: newScaleY,
-          });
+          if (selectedObject.type === "text") {
+            // For text: bake the scale into the bounds so font size isn't stretched.
+            // The bounding box grows/shrinks but scaleX/scaleY stay at 1.
+            const newHalfW = Math.abs((originalBounds.width / 2) * newScaleX);
+            const newHalfH = Math.abs((originalBounds.height / 2) * newScaleY);
+            updateObject(selectedIdx, {
+              startX: newWorldCenterX - newHalfW,
+              startY: newWorldCenterY - newHalfH,
+              endX: newWorldCenterX + newHalfW,
+              endY: newWorldCenterY + newHalfH,
+              scaleX: 1,
+              scaleY: 1,
+            });
+          } else {
+            updateObject(selectedIdx, {
+              startX: originalObj.startX + centerOffsetX,
+              startY: originalObj.startY + centerOffsetY,
+              endX: originalObj.endX + centerOffsetX,
+              endY: originalObj.endY + centerOffsetY,
+              scaleX: newScaleX,
+              scaleY: newScaleY,
+            });
+          }
 
           // Force redraw for immediate feedback
           requestAnimationFrame(redraw);

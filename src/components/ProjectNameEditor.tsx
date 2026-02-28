@@ -1,52 +1,51 @@
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { FiEdit2 } from "react-icons/fi";
+import { useState, useRef, useEffect } from "react";
 
 export default function ProjectNameEditor() {
   const [projectName, setProjectName] = useState("Untitled Project");
-  const [isEditingProjectName, setIsEditingProjectName] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(projectName);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleProjectNameEdit = () => {
-    setIsEditingProjectName(true);
-  };
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.select();
+    }
+  }, [isEditing]);
 
-  const handleProjectNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setProjectName(e.target.value);
-  };
-
-  const handleProjectNameSave = () => {
-    setIsEditingProjectName(false);
+  const commit = () => {
+    const trimmed = draft.trim() || "Untitled Project";
+    setProjectName(trimmed);
+    setDraft(trimmed);
+    setIsEditing(false);
   };
 
   return (
-    <div className="flex items-center gap-2 ml-4">
-      {isEditingProjectName ? (
-        <div className="flex items-center">
-          <Input
-            type="text"
-            value={projectName}
-            onChange={handleProjectNameChange}
-            onBlur={handleProjectNameSave}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleProjectNameSave();
-            }}
-            className="h-7 text-sm w-48"
-            autoFocus
-          />
-        </div>
+    <div className="flex items-center min-w-0">
+      {isEditing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") {
+              setDraft(projectName);
+              setIsEditing(false);
+            }
+          }}
+          className="h-6 text-xs bg-transparent border-b border-accent text-foreground outline-none w-36 px-0"
+          maxLength={64}
+          spellCheck={false}
+          autoFocus
+        />
       ) : (
-        <>
-          <span className="text-sm text-muted-foreground">{projectName}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={handleProjectNameEdit}
-          >
-            <FiEdit2 className="h-3 w-3" />
-          </Button>
-        </>
+        <button
+          onClick={() => { setDraft(projectName); setIsEditing(true); }}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors truncate max-w-[160px]"
+        >
+          {projectName}
+        </button>
       )}
     </div>
   );

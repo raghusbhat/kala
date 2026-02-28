@@ -4,35 +4,31 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 5.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 262 83% 58%; /* #7c3aed */
+    /* Linear-inspired dark palette */
+    --background: 0 0% 6%;           /* #0F0F0F */
+    --foreground: 0 0% 91%;          /* #E8E8E8 */
+    --card: 0 0% 8%;                 /* #141414 */
+    --card-foreground: 0 0% 91%;
+    --popover: 0 0% 11%;             /* #1C1C1C */
+    --popover-foreground: 0 0% 91%;
+    --primary: 234 53% 60%;          /* #5E6AD2 */
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5.7% 12.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 262 83% 58%; /* #7c3aed */
+    --secondary: 0 0% 11%;           /* #1C1C1C */
+    --secondary-foreground: 0 0% 91%;
+    --muted: 0 0% 11%;               /* #1C1C1C */
+    --muted-foreground: 0 0% 54%;    /* #8A8A8A */
+    --accent: 234 53% 60%;           /* #5E6AD2 */
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 72% 51%;        /* #E5484D */
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 262 83% 58%; /* #7c3aed */
-    --radius: 0.5rem;
+    --border: 0 0% 15%;              /* #262626 */
+    --input: 0 0% 12%;               /* #1F1F1F */
+    --ring: 234 53% 60%;
+    --radius: 0.375rem;
 
     /* Canvas specific */
-    --canvas-bg: 0 0% 10%; /* Slightly lighter than background */
-    --toolbar-bg: 240 10% 5.9%; /* Same as --card for consistency with header */
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --canvas-bg: 0 0% 10%;
+    --toolbar-bg: 0 0% 8%;
   }
 }
 
@@ -42,6 +38,10 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
@@ -61,31 +61,30 @@ body,
   height: 100%;
 }
 
-/* Custom scrollbar styles for dark theme */
+/* Custom scrollbar — subtle gray, not accent-colored */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--accent));
-  border-radius: 8px;
-  transition: background 0.2s;
+  background: hsl(0 0% 22%);
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--accent) / 0.8);
+  background: hsl(0 0% 30%);
 }
 ::-webkit-scrollbar-track {
-  background: hsl(var(--background));
+  background: transparent;
 }
 
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--accent)) hsl(var(--background));
+  scrollbar-color: hsl(0 0% 22%) transparent;
 }
 
 textarea:focus {
   border-color: hsl(var(--accent)) !important;
-  box-shadow: 0 0 0 1.5px hsl(var(--accent));
+  box-shadow: 0 0 0 1px hsl(var(--accent) / 0.4);
   outline: none;
 }

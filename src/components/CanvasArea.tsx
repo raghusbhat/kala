@@ -1,5 +1,4 @@
 import { useRef } from "react";
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -12,7 +11,6 @@ import {
   FiCircle,
   FiType,
   FiEdit2,
-  FiMaximize,
   FiPlus,
   FiMinus,
   FiPenTool,
@@ -51,105 +49,109 @@ export default function CanvasArea({
     const factor = direction === "in" ? 1.2 : 0.8;
     const newScale = Math.max(0.1, Math.min(scale * factor, 5));
     setScale(newScale);
-
-    // Force redraw after scale change
     if (skiaCanvasRef.current?.redraw) {
       setTimeout(() => skiaCanvasRef.current.redraw(), 0);
     }
   };
 
+  const zoomPercent = Math.round(scale * 100);
+
   return (
     <main className="flex-1 relative overflow-hidden bg-[hsl(var(--canvas-bg))]">
       <div className="relative w-full h-full" ref={canvasContainerRef}>
-        {/* Floating toolbar */}
         <TooltipProvider>
           <FloatingToolbar>
+            {/* Selection tools */}
             <ToolButton
               tool="select"
               currentTool={currentTool}
               icon={FiMove}
               onClick={() => handleToolChange("select")}
-              tooltip="Select Tool (V)"
+              tooltip="Select (V)"
             />
             <ToolButton
               tool="frame"
               currentTool={currentTool}
               icon={FrameIcon as any}
               onClick={() => handleToolChange("frame")}
-              tooltip="Frame Tool (F)"
+              tooltip="Frame (F)"
             />
+
+            {/* Divider */}
+            <div className="w-px h-4 bg-border mx-0.5" />
+
+            {/* Shape tools */}
             <ToolButton
               tool="rectangle"
               currentTool={currentTool}
               icon={FiSquare}
               onClick={() => handleToolChange("rectangle")}
-              tooltip="Rectangle Tool (R)"
+              tooltip="Rectangle (R)"
             />
             <ToolButton
               tool="ellipse"
               currentTool={currentTool}
               icon={FiCircle}
               onClick={() => handleToolChange("ellipse")}
-              tooltip="Ellipse Tool (O)"
+              tooltip="Ellipse (O)"
             />
+
+            {/* Divider */}
+            <div className="w-px h-4 bg-border mx-0.5" />
+
+            {/* Drawing tools */}
             <ToolButton
               tool="pencil"
               currentTool={currentTool}
               icon={FiEdit2}
               onClick={() => handleToolChange("pencil")}
-              tooltip="Pencil Tool (B)"
+              tooltip="Pencil (B)"
             />
             <ToolButton
               tool="pen"
               currentTool={currentTool}
               icon={FiPenTool}
               onClick={() => handleToolChange("pen")}
-              tooltip="Pen Tool (P)"
+              tooltip="Pen (P)"
             />
             <ToolButton
               tool="text"
               currentTool={currentTool}
               icon={FiType}
               onClick={() => handleToolChange("text")}
-              tooltip="Text Tool (T)"
+              tooltip="Text (T)"
             />
+
+            {/* Divider */}
+            <div className="w-px h-4 bg-border mx-0.5" />
+
+            {/* Zoom controls */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <FiMaximize className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Fit to Screen</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleZoom("in")}
-                >
-                  <FiPlus className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Zoom In (+)</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <button
                   onClick={() => handleZoom("out")}
+                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
-                  <FiMinus className="h-4 w-4" />
-                </Button>
+                  <FiMinus className="h-3.5 w-3.5" />
+                </button>
               </TooltipTrigger>
-              <TooltipContent>
-                <p>Zoom Out (-)</p>
-              </TooltipContent>
+              <TooltipContent side="bottom" className="text-xs">Zoom Out (-)</TooltipContent>
+            </Tooltip>
+
+            <span className="text-xs text-muted-foreground tabular-nums w-9 text-center select-none">
+              {zoomPercent}%
+            </span>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => handleZoom("in")}
+                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <FiPlus className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">Zoom In (+)</TooltipContent>
             </Tooltip>
           </FloatingToolbar>
         </TooltipProvider>

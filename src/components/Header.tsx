@@ -1,7 +1,5 @@
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { FiShare2 } from "react-icons/fi";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Share2 } from "lucide-react";
 import ProjectNameEditor from "./ProjectNameEditor";
 
 interface HeaderProps {
@@ -19,48 +18,72 @@ interface HeaderProps {
 
 export default function Header({ activeMode, setActiveMode }: HeaderProps) {
   return (
-    <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card">
-      <div className="flex items-center gap-4">
-        <h1 className="text-xl font-semibold text-primary">Chitrapata</h1>
+    <header className="h-11 border-b border-border flex items-center justify-between px-3 bg-card shrink-0">
+      {/* Left: logo + project name */}
+      <div className="flex items-center gap-3 min-w-0">
+        {/* Logo mark */}
+        <div className="flex items-center gap-2 shrink-0">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect width="18" height="18" rx="4" fill="hsl(234 53% 60%)" />
+            <path d="M4 14L9 4L14 14" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="text-sm font-semibold tracking-tight text-foreground">Kala</span>
+        </div>
+        <div className="w-px h-4 bg-border shrink-0" />
         <ProjectNameEditor />
       </div>
 
-      <div className="flex items-center gap-4">
-        <Tabs
-          value={activeMode}
-          onValueChange={(v) => setActiveMode(v as "design" | "dev")}
-          className="bg-muted rounded-md"
+      {/* Center: mode toggle */}
+      <div className="flex items-center gap-0.5 bg-muted rounded-md p-0.5">
+        <button
+          onClick={() => setActiveMode("design")}
+          className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+            activeMode === "design"
+              ? "bg-popover text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
         >
-          <TabsList>
-            <TabsTrigger value="design" className="text-xs">
-              Design
-            </TabsTrigger>
-            <TabsTrigger value="dev" className="text-xs">
-              Dev
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+          Design
+        </button>
+        <button
+          onClick={() => setActiveMode("dev")}
+          className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+            activeMode === "dev"
+              ? "bg-popover text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Dev
+        </button>
+      </div>
 
-        <Button variant="ghost" size="icon" className="h-8 w-8">
-          <FiShare2 className="h-4 w-4" />
+      {/* Right: actions */}
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2.5"
+        >
+          <Share2 className="h-3.5 w-3.5" />
+          Share
         </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="rounded-full h-8 w-8 p-0">
-              <Avatar>
+            <Button variant="ghost" className="rounded-full h-7 w-7 p-0 ml-1">
+              <Avatar className="h-6 w-6">
                 <AvatarImage src="https://github.com/shadcn.png" />
-                <AvatarFallback>KU</AvatarFallback>
+                <AvatarFallback className="text-[10px] bg-accent text-accent-foreground">K</AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuLabel className="text-xs">My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profile</DropdownMenuItem>
-            <DropdownMenuItem>Settings</DropdownMenuItem>
+            <DropdownMenuItem className="text-xs">Profile</DropdownMenuItem>
+            <DropdownMenuItem className="text-xs">Settings</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Logout</DropdownMenuItem>
+            <DropdownMenuItem className="text-xs text-destructive focus:text-destructive">Logout</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

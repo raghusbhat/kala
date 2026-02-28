@@ -1,4 +1,3 @@
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -8,7 +7,7 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
-import { FiChevronDown, FiTrash2, FiLink, FiUnlock } from "react-icons/fi";
+import { FiTrash2, FiLink, FiUnlock } from "react-icons/fi";
 import PropertySection from "./ui-custom/PropertySection";
 import PropertyInput from "./ui-custom/PropertyInput";
 import ColorInput from "./ui-custom/ColorInput";
@@ -37,7 +36,6 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import { toast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 import { useAI } from "../lib/ai/useAI";
 import type { ChatMessage } from "../lib/ai/useAI";
@@ -213,54 +211,37 @@ export default function PropertiesSidebar({
   }, []);
 
   return (
-    <aside className="w-72 border-l border-border bg-card flex flex-col">
+    <aside className="w-72 border-l border-border bg-card flex flex-col shrink-0">
       <Toaster />
       <Tabs
         value={tab}
         onValueChange={setTab}
         className="flex flex-col flex-1 h-full"
       >
-        <TabsList className="w-full flex justify-center bg-transparent border-none rounded-none mt-1 mb-2 gap-1 px-2">
-          <TabsTrigger
-            value="properties"
-            className="flex-1 h-8 px-2 text-xs font-medium rounded-md transition-all data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=inactive]:bg-muted data-[state=inactive]:text-muted-foreground"
-          >
-            Properties
-          </TabsTrigger>
-          <TabsTrigger
-            value="ai"
-            className="flex-1 h-8 px-2 text-xs font-medium rounded-md transition-all data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=inactive]:bg-muted data-[state=inactive]:text-muted-foreground"
-          >
-            AI
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="properties" className="flex-1 p-0">
-          <div className="flex flex-col flex-1">
-            <div className="p-4 font-medium flex items-center justify-between">
-              <div className="flex gap-2 items-center">
-                <span>Properties</span>
-                {selectedLayer ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 text-xs flex items-center gap-1 text-muted-foreground"
-                  >
-                    {selectedLayer.name}
-                    <FiChevronDown className="h-3 w-3" />
-                  </Button>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 text-xs flex items-center gap-1 text-muted-foreground"
-                  >
-                    Canvas
-                    <FiChevronDown className="h-3 w-3" />
-                  </Button>
-                )}
-              </div>
-            </div>
-            <Separator />
+        {/* Tab switcher */}
+        <div className="flex items-center border-b border-border shrink-0">
+          <TabsList className="flex bg-transparent rounded-none p-0 h-10 gap-0">
+            <TabsTrigger
+              value="properties"
+              className="relative h-full px-4 text-xs font-medium rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground transition-colors bg-transparent hover:text-foreground"
+            >
+              Inspect
+            </TabsTrigger>
+            <TabsTrigger
+              value="ai"
+              className="relative h-full px-4 text-xs font-medium rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:text-foreground data-[state=inactive]:text-muted-foreground transition-colors bg-transparent hover:text-foreground"
+            >
+              AI
+            </TabsTrigger>
+          </TabsList>
+          {selectedLayer && (
+            <span className="ml-auto mr-3 text-[11px] text-muted-foreground/60 truncate max-w-[100px]">
+              {selectedLayer.name}
+            </span>
+          )}
+        </div>
+        <TabsContent value="properties" className="flex-1 p-0 overflow-hidden">
+          <div className="flex flex-col flex-1 h-full">
             {selectedLayer ? (
               <TooltipProvider>
                 <ScrollArea className="flex-1">
@@ -618,11 +599,11 @@ export default function PropertiesSidebar({
             )}
           </div>
         </TabsContent>
-        <TabsContent value="ai" className="flex flex-col flex-1 p-0">
+        <TabsContent value="ai" className="flex flex-col flex-1 p-0 overflow-hidden">
           <TooltipProvider>
-            <div className="flex flex-col flex-1 h-full">
+            <div className="flex flex-col flex-1 h-full overflow-hidden">
               {/* API Key input */}
-              <div className="px-3 pt-3 pb-1">
+              <div className="px-3 pt-3 pb-2 shrink-0 border-b border-border">
                 <ApiKeyInput
                   value={apiKey}
                   onChange={handleApiKeyChange}
@@ -630,26 +611,25 @@ export default function PropertiesSidebar({
                   placeholder={`Enter your ${selectedModel} API key...`}
                 />
               </div>
-              <ScrollArea className="flex-1 px-3 py-2 space-y-3">
+              <ScrollArea className="flex-1 px-3 py-3">
                 {messages.map((msg, i) => (
                   <div
                     key={i}
-                    className={`flex w-full mb-2 ${
+                    className={`flex w-full mb-3 ${
                       msg.role === "ai" ? "justify-start" : "justify-end"
                     }`}
                   >
                     <div
-                      className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm whitespace-pre-line shadow-sm border ${
-                        {
-                          ai: "bg-muted text-muted-foreground border-border rounded-bl-md",
-                          user: "bg-accent text-accent-foreground border-accent rounded-br-md",
-                        }[msg.role]
-                      } ${msg.role === "ai" ? "text-left" : "text-right"}`}
+                      className={`max-w-[80%] px-3 py-2 rounded-xl text-xs whitespace-pre-line ${
+                        msg.role === "ai"
+                          ? "bg-muted text-muted-foreground"
+                          : "bg-accent text-accent-foreground"
+                      }`}
                       style={{ wordBreak: "break-word" }}
                     >
                       {msg.content}
                       {msg.isStreaming && (
-                        <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-muted-foreground rounded-sm animate-pulse" />
+                        <span className="inline-block w-1 h-3 ml-0.5 bg-current rounded-sm animate-pulse opacity-60" />
                       )}
                     </div>
                   </div>
@@ -657,8 +637,7 @@ export default function PropertiesSidebar({
                 <div ref={messagesEndRef} />
               </ScrollArea>
               <form
-                className="relative z-10 flex flex-col gap-1 bg-[hsl(240,6%,16%)] shadow-2xl rounded-xl mx-2 mt-4 mb-4 p-3 border border-[hsl(240,6%,28%)] transition-all"
-                style={{ boxShadow: "0 4px 16px 0 rgba(30,30,40,0.55)" }}
+                className="relative z-10 flex flex-col gap-1.5 bg-muted rounded-xl mx-2 mb-3 p-2.5 border border-border/60 shrink-0"
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (isLoading) return;
@@ -818,7 +797,7 @@ export default function PropertiesSidebar({
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Describe what to create or modify..."
-                    className="w-full min-h-[48px] max-h-[180px] resize-none bg-background border border-border focus:border-accent focus:ring-1 focus:ring-accent rounded-lg pr-3 transition-all text-sm py-2 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full min-h-[40px] max-h-[160px] resize-none bg-transparent border-none focus:ring-0 focus:outline-none text-xs text-foreground placeholder:text-muted-foreground/50 py-1 px-0 disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
                     autoFocus={tab === "ai"}
                     disabled={isLoading}
                     style={{ overflowY: "auto" }}
@@ -847,7 +826,7 @@ export default function PropertiesSidebar({
                     }}
                   />
                 </div>
-                <div className="flex items-center gap-1 bg-foreground/5 border border-foreground/5 rounded-md px-2 py-0.5">
+                <div className="flex items-center gap-1 rounded px-1 py-0.5">
                   <DropdownMenu>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -855,18 +834,19 @@ export default function PropertiesSidebar({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="flex items-center gap-1 text-xs text-muted-foreground font-medium bg-transparent hover:bg-transparent focus:bg-transparent px-2 py-1 h-7"
+                            className="flex items-center gap-1 text-[11px] text-muted-foreground font-medium hover:text-foreground h-6 px-1.5"
                           >
                             {selectedModel}
-                            <ChevronUp className="w-3 h-3 ml-1" />
+                            <ChevronUp className="w-2.5 h-2.5 ml-0.5" />
                           </Button>
                         </DropdownMenuTrigger>
                       </TooltipTrigger>
                     </Tooltip>
-                    <DropdownMenuContent align="start" side="top">
+                    <DropdownMenuContent align="start" side="top" className="text-xs">
                       {["Gemini", "GPT-4", "Claude"].map((model) => (
                         <DropdownMenuItem
                           key={model}
+                          className="text-xs"
                           onClick={() => setSelectedModel(model)}
                         >
                           {model}
@@ -880,11 +860,11 @@ export default function PropertiesSidebar({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-10 w-10 text-foreground/70 hover:text-foreground bg-transparent hover:bg-transparent focus:bg-transparent"
+                        className="h-6 w-6 text-muted-foreground hover:text-foreground"
                         onClick={() => fileInputRef.current?.click()}
                         tabIndex={-1}
                       >
-                        <Image className="w-5 h-5" />
+                        <Image className="w-3.5 h-3.5" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Attach image</TooltipContent>
@@ -927,12 +907,12 @@ export default function PropertiesSidebar({
                     type="submit"
                     size="sm"
                     disabled={isLoading || (!chatInput.trim() && attachedImages.length === 0)}
-                    className="h-8 w-8 bg-accent text-accent-foreground hover:bg-accent/90 rounded-md flex items-center justify-center ml-2 p-0"
+                    className="h-6 w-6 bg-accent text-accent-foreground hover:bg-accent/90 rounded flex items-center justify-center p-0 disabled:opacity-40"
                   >
                     {isLoading ? (
-                      <Loader2 className="w-4 h-4 mx-auto animate-spin" />
+                      <Loader2 className="w-3 h-3 animate-spin" />
                     ) : (
-                      <Send className="w-4 h-4 mx-auto" />
+                      <Send className="w-3 h-3" />
                     )}
                   </Button>
                 </div>

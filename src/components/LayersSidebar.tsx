@@ -1,6 +1,4 @@
 import React, { useState, useCallback } from "react";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FiSearch } from "react-icons/fi";
 import Layer from "./Layer";
@@ -23,29 +21,31 @@ export default function LayersSidebar({
 }: LayersSidebarProps) {
   const { reorderLayers, updateLayerName } = useLayerStore();
   const { objects, updateObject } = useCanvasStore();
+  const [search, setSearch] = useState("");
 
   const handleRename = (id: string, newName: string) => {
     updateLayerName(id, newName);
-    // If this is a frame, update the canvas object name too
     const objIdx = objects.findIndex((o) => o.id === id);
     if (objIdx !== -1 && (objects[objIdx] as any).isFrame) {
       updateObject(objIdx, { name: newName });
     }
   };
 
-  // Track collapsed state per layer id
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
 
   const toggleCollapse = useCallback((id: string) => {
     setCollapsedMap((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  // Build hierarchical tree
+  const filteredLayers = search.trim()
+    ? layers.filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
+    : layers;
+
   const buildTree = (
     parentId: string | undefined | null,
     depth: number
   ): React.ReactElement[] => {
-    return layers
+    return filteredLayers
       .filter((l) => (l.parentId || null) === (parentId || null))
       .map((layer) => {
         const children = layers.filter((c) => (c.parentId || null) === layer.id);
@@ -68,7 +68,6 @@ export default function LayersSidebar({
               collapsed={isCollapsed}
               toggleCollapse={() => toggleCollapse(layer.id)}
             />
-            {/* Render children only if not collapsed */}
             {!isCollapsed && buildTree(layer.id, depth + 1)}
           </div>
         );
@@ -76,24 +75,36 @@ export default function LayersSidebar({
   };
 
   return (
-    <aside className="w-56 border-r border-border bg-card flex flex-col">
-      <div className="p-4 font-medium flex items-center justify-between">
-        <span>Layers</span>
+    <aside className="w-56 border-r border-border bg-card flex flex-col shrink-0">
+      {/* Header */}
+      <div className="px-3 py-2 flex items-center justify-between shrink-0">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Layers</span>
       </div>
-      <div className="px-3 pb-2">
+
+      {/* Search */}
+      <div className="px-2 pb-2 shrink-0">
         <div className="relative">
-          <FiSearch className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-          <Input placeholder="Search layers..." className="pl-7 h-8 text-xs" />
+          <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search"
+            className="w-full h-6 pl-6 pr-2 text-xs bg-muted/50 border border-transparent rounded focus:outline-none focus:border-border text-foreground placeholder:text-muted-foreground/60 transition-colors"
+          />
         </div>
       </div>
-      <Separator />
-      <ScrollArea className="flex-1 overflow-y-auto overflow-x-auto">
-        <div className="p-2 select-none min-w-full">
+
+      <div className="h-px bg-border shrink-0" />
+
+      <ScrollArea className="flex-1 overflow-y-auto">
+        <div className="py-1 select-none">
           {layers.length > 0 ? (
             buildTree(null, 0)
           ) : (
-            <div className="p-4 text-xs text-muted-foreground text-center">
-              No layers yet. Draw something using the tools above.
+            <div className="px-3 py-6 text-[11px] text-muted-foreground/60 text-center leading-relaxed">
+              No layers yet.
+              <br />
+              Draw something to begin.
             </div>
           )}
         </div>

@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -22,24 +21,23 @@ export default function ToolButton({
   onClick,
   tooltip,
 }: ToolButtonProps) {
+  const isActive = currentTool === tool;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
+        <button
           onClick={onClick}
-          className={
-            currentTool === tool
-              ? "bg-primary/20 text-primary hover:bg-primary/30"
-              : "hover:bg-muted"
-          }
+          className={`h-7 w-7 flex items-center justify-center rounded transition-colors ${
+            isActive
+              ? "bg-accent/15 text-accent"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          }`}
         >
-          <Icon className="h-4 w-4" />
-        </Button>
+          <Icon className="h-3.5 w-3.5" />
+        </button>
       </TooltipTrigger>
-      <TooltipContent>
-        <p>{tooltip}</p>
+      <TooltipContent side="bottom" className="text-xs">
+        {tooltip}
       </TooltipContent>
     </Tooltip>
   );
